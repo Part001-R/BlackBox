@@ -1,4 +1,4 @@
-![](https://github.com/Part001-R/Test_README/blob/Develop/data/2.png)
+![](https://github.com/Part001-R/BlackBox/blob/main/assets/img.png)
 
 # Чёрный ящик
 
