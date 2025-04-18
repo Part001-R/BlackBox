@@ -44,10 +44,12 @@ func main() {
 	// Открытие конфигурационного файла
 	err = cnf.Read()
 	if err != nil {
-		lgr.E.Println("неудалось открыть файл конфигурации", err)
+		lgr.E.Println("ошибка при чтении файла конфигурации", err)
 		os.Exit(1)
 	}
 	lgr.I.Println("чтение конфигурационного файла выполнено")
+
+	cnf.Show()
 
 	//modbustcpmaster.Test()
 
