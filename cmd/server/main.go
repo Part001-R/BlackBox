@@ -31,19 +31,21 @@ type (
 		mbRTUmaster []modbusrtumaster.Connect
 	}
 
-	// каналы хоста
-	channelsHost struct {
-		DB    []chDB
-		Queue []chQue
-	}
-	chDB struct {
-		name string
-		ch   chan []database.StoreType
-	}
-	chQue struct {
-		name string
-		ch   chan []libre.ChConfExt_Export
-	}
+	/*
+		// каналы хоста
+		channelsHost struct {
+			DB    []chDB
+			Queue []chQue
+		}
+		chDB struct {
+			name string
+			ch   chan []database.StoreType
+		}
+		chQue struct {
+			name string
+			ch   chan []libre.ChConfExt_Export
+		}
+	*/
 
 	// набор данных для запуска Go рутин
 	goInst struct {
@@ -102,6 +104,8 @@ var (
 
 	maxEthernetDev = 2
 	maxCOMDev      = 4
+
+	timeStart time.Time
 )
 
 // Точка входа
@@ -377,9 +381,43 @@ func fullRun() {
 
 	fmt.Println("Опрос запущен.")
 
-	// Запуск http сервера
+	// =================================================================
+	// =================================================================
+	fmt.Println()
+	timeStart = time.Now()
+	fmt.Println("Время запуска:", timeStart.Format("01-02-2006 15:04:05"))
+	fmt.Println()
+
+	fmt.Println("Modbus-RTU. Количество коннектов хоста", len(hostConnects.mbRTUmaster))
+	for _, v := range hostConnects.mbRTUmaster {
+		fmt.Println("Имя коннекта:", v.Name)
+		fmt.Println("Подключение:", v.Port)
+		fmt.Printf("Парметры: Скорость->{%d} Данные->{%d} Чётность->{%s} Стоп бит->{%d} \n", v.ParamsConn.BaudRate, v.ParamsConn.DataBits, v.ParamsConn.Parity, v.ParamsConn.StopBits)
+	}
+	fmt.Println()
+	fmt.Println("Modbus-TCP. Количество коннектов хоста", len(hostConnects.mbTCPmaster))
+	for _, v := range hostConnects.mbTCPmaster {
+		fmt.Println("Имя коннекта:", v.Name)
+		fmt.Printf("Подключение: IP->{%s}\n", v.HostIP)
+	}
+
+	fmt.Println()
+	a, b, c, err := lgr.SizeFiles()
+	if err != nil {
+		fmt.Println("ошибка при чтении размера файлов")
+		return
+	}
+	fmt.Println("Размер файлов в МБ", a, b, c)
+	fmt.Println()
+	// =================================================================
+	// =================================================================
+
+	// Запуск https сервера (внешний)
 	//
-	httpServer()
+
+	// Запуск http сервера (локальный)
+	//
+	httpServerLocal()
 
 	fmt.Println("Завершение работы приложения")
 	cancel()      // закрытие контекста
@@ -1466,7 +1504,7 @@ func goDriverDB(ctx context.Context, chStore <-chan []database.StoreType, wg *sy
 // Параметры:
 //
 // ctx - контекст для завершения работы
-// lgr - логер сообщений
+// lgr - логер
 // con - коннект
 // chForModbusTCP - канал приёма запросов на опрос
 // chForDB - канал передачи данных на архивирование в Go БД
@@ -1478,15 +1516,6 @@ func goDriverModbusTCP(ctx context.Context, lgr loger.Log_Object, con modbustcpm
 	defer func() {
 		wg.Done()
 		goStatus.DriverModbusTCP = false
-	}()
-
-	defer func() {
-		if con.Client != nil {
-			err := con.Close()
-			if err != nil {
-				lgr.E.Println("драйвер Modbus-TCP. ошибка закрытия подключения", con.Name)
-			}
-		}
 	}()
 
 	if con.Client == nil {
@@ -1529,6 +1558,7 @@ func goDriverModbusTCP(ctx context.Context, lgr loger.Log_Object, con modbustcpm
 				switch v.FuncType {
 				case "ReadHoldingRegisters", "ReadInputRegisters":
 					if err != nil {
+						lgr.W.Printf("ошибка {%v} при запросе Modbus-TCP: слейв {%d}, функция {%s}, адрес регистра {%d}, количество регистров {%d} ", err, slaveID, v.FuncType, address, quantity)
 						rx.Value = 0
 						rx.Qual = 0
 					} else {
@@ -1546,6 +1576,7 @@ func goDriverModbusTCP(ctx context.Context, lgr loger.Log_Object, con modbustcpm
 
 				case "ReadDiscreteInputs", "ReadCoil":
 					if err != nil {
+						lgr.W.Printf("ошибка {%v} при запросе Modbus-TCP: слейв {%d}, функция {%s}, адрес регистра {%d}, количество регистров {%d} ", err, slaveID, v.FuncType, address, quantity)
 						rx.Value = 0
 						rx.Qual = 0
 					} else {
@@ -1580,6 +1611,14 @@ func goDriverModbusTCP(ctx context.Context, lgr loger.Log_Object, con modbustcpm
 }
 
 // Go. Опрос устройств по Modbus-RTU
+//
+// Параметры:
+//
+// ctx - контекст для завершения работы
+// lgr - логер
+// con - коннект
+// chForModbusRTU - канал приёма запросов на опрос
+// chForDB - канал передачи данных на архивирование в Go БД
 func goDriverModbusRTU(ctx context.Context, lgr loger.Log_Object, con modbusrtumaster.Connect, chForModbusRTU <-chan []libre.ChConfExt_Export, chForDB chan<- []database.StoreType, wg *sync.WaitGroup) {
 
 	wg.Add(1)
@@ -1588,15 +1627,6 @@ func goDriverModbusRTU(ctx context.Context, lgr loger.Log_Object, con modbusrtum
 	defer func() {
 		wg.Done()
 		goStatus.DriverModbusRTU = false
-	}()
-
-	defer func() {
-		if con.Client != nil {
-			err := con.Close()
-			if err != nil {
-				lgr.E.Println("драйвер Modbus-RTU. ошибка закрытия подключения", con.Name)
-			}
-		}
 	}()
 
 	if con.Client == nil {
@@ -1609,7 +1639,7 @@ func goDriverModbusRTU(ctx context.Context, lgr loger.Log_Object, con modbusrtum
 	for {
 		select {
 
-		//Завершение работы по контексту
+		// Завершение работы по контексту
 		case <-ctx.Done():
 			return
 
@@ -1621,6 +1651,7 @@ func goDriverModbusRTU(ctx context.Context, lgr loger.Log_Object, con modbusrtum
 
 			slRx := make([]database.StoreType, 0)
 
+			// Выполнение запросов согласно принятым данным
 			for _, v := range newReq {
 
 				// подготовка данных для запроса
@@ -1634,48 +1665,22 @@ func goDriverModbusRTU(ctx context.Context, lgr loger.Log_Object, con modbusrtum
 
 				// запрос
 				rxByte, err := selectFuncMbRTUDo(con, v.FuncType, slaveID, address, quantity)
-
-				// Обработка результата запроса
-				switch v.FuncType {
-				case "ReadHoldingRegisters", "ReadInputRegisters":
+				if err != nil {
+					lgr.W.Printf("ошибка {%v} при запросе Modbus-RTU: слейв {%d}, функция {%s}, адрес регистра {%d}, количество регистров {%d} ", err, slaveID, v.FuncType, address, quantity)
+					rx.Value = 0
+					rx.Qual = 0
+				} else {
+					val, err := buildValFromByte(rxByte, v.DataType, v.Format)
 					if err != nil {
-						rx.Value = 0
-						rx.Qual = 0
-					} else {
-						val, err := buildValFromByte(rxByte, v.DataType, v.Format)
-						if err != nil {
-							lgr.E.Println("ошибка в обработке принятых данных Modbus-RTU: ", err)
-							os.Exit(1)
-						}
-						rx.Value = val
-						rx.Qual = 1
+						lgr.E.Println("ошибка в обработке принятых данных Modbus-RTU: ", err)
+						os.Exit(1)
 					}
-					rx.Dev = v.DeviceName
-					rx.Name = v.Comment
-					slRx = append(slRx, rx)
-
-				case "ReadDiscreteInputs", "ReadCoil":
-					if err != nil {
-						rx.Value = 0
-						rx.Qual = 0
-					} else {
-						val, err := buildValFromByte(rxByte, v.DataType, v.Format)
-						if err != nil {
-							lgr.E.Println("ошибка в обработке принятых данных Modbus-RTU: ", err)
-							os.Exit(1)
-						}
-						rx.Value = val
-						rx.Qual = 1
-					}
-					rx.Dev = v.DeviceName
-					rx.Name = v.Comment
-					slRx = append(slRx, rx)
-
-				default:
-					lgr.E.Println("ошибка распознавания функции: ", v.FuncType)
-					os.Exit(1)
+					rx.Value = val
+					rx.Qual = 1
 				}
-
+				rx.Dev = v.DeviceName
+				rx.Name = v.Comment
+				slRx = append(slRx, rx)
 			}
 
 			// передача сформированного слайса в канал
@@ -2174,7 +2179,7 @@ func selectFuncMbTCPDo(con modbustcpmaster.Connect, function string, slaveID byt
 
 }
 
-// Выбор функции запроса Modbus и выполнение. Возвращается массив uint16 или byte и ошибка.
+// Выбор функции запроса Modbus и выполнение. Возвращается массив byte и ошибка.
 //
 // Параметры:
 //
@@ -2184,8 +2189,10 @@ func selectFuncMbTCPDo(con modbustcpmaster.Connect, function string, slaveID byt
 // quantity - количество регистров запроса.
 func selectFuncMbRTUDo(con modbusrtumaster.Connect, function string, slaveID byte, address uint16, quantity uint16) (resByte []byte, err error) {
 
+	// установка адреса ведомого устройства
 	con.ChangeSlaveID(slaveID)
 
+	// выполнение запроса
 	switch function {
 	case "ReadHoldingRegisters":
 		resBytes, err := con.Client.ReadHoldingRegisters(address, quantity)
@@ -2565,9 +2572,9 @@ func buildValFromByte(srcData []byte, dataType string, format string) (value int
 }
 
 // запуск http сервера
-func httpServer() {
+func httpServerLocal() {
 
-	fmt.Println("Запуск HTTP сервера.")
+	fmt.Println("Запуск локаьного HTTP сервера.")
 
 	// Ручки HTTP сервера
 	r := chi.NewRouter()

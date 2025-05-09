@@ -37,7 +37,7 @@ func (mb *Connect) Connect() error {
 	provider.Parity = mb.ParamsConn.Parity          // Четность (N - None, E - Even, O - Odd)
 	provider.StopBits = mb.ParamsConn.StopBits      // Количество стоп-битов
 	provider.SlaveId = mb.SlaveAddr                 // ID ведомого устройства
-	provider.Timeout = 200 * time.Millisecond       // Таймаут ответа
+	provider.Timeout = 50 * time.Millisecond        // Таймаут ответа
 	//provider.Logger = log.New(os.Stdout, "modbus: ", log.LstdFlags)
 
 	// Создание коннекта

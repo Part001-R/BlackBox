@@ -2,6 +2,7 @@ package log
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"os"
 )
@@ -12,15 +13,11 @@ type (
 		W        *log.Logger
 		E        *log.Logger
 		CloseAll func() error
-		isRun    bool
-	}
-
-	Log_Intf interface {
-		CreateOpenLog() error
+		//isRun    bool
 	}
 )
 
-// Функция подключается в файлам логирования или создаёт их, в случае отсутствия.
+// Функция подключается в файлам логирования или создаёт их, в случае отсутствия. Возвращает ошибку
 func (l *Log_Object) CreateOpenLog() error {
 
 	dirLogFiles := os.Getenv("LOG_PATH")
@@ -83,4 +80,41 @@ func (l *Log_Object) CreateOpenLog() error {
 
 	return nil
 
+}
+
+// Получение размеров файлов. Возвращает размеры файлов и ошибку.
+func (l *Log_Object) SizeFiles() (sizeIMB, sizeWMB, sizeEMB int64, err error) {
+
+	dirLogFiles := os.Getenv("LOG_PATH")
+
+	listFiles := []string{"log_info.log", "log_warn.log", "log_error.log"}
+
+	for i, v := range listFiles {
+
+		// Открываем файл
+		var file *os.File
+		file, err = os.OpenFile(dirLogFiles+v, os.O_RDONLY, 0666)
+		if err != nil {
+			return 0, 0, 0, fmt.Errorf("ошибка {%v} при открытии файла", err)
+		}
+		defer file.Close()
+
+		// Получаем информацию о файле
+		var fileInfo os.FileInfo
+		fileInfo, err = file.Stat()
+		if err != nil {
+			return 0, 0, 0, fmt.Errorf("ошибка {%v} при получении информации о файле", err)
+		}
+
+		switch i {
+		case 0:
+			sizeIMB = fileInfo.Size() / 2048
+		case 1:
+			sizeWMB = fileInfo.Size() / 2048
+		case 2:
+			sizeEMB = fileInfo.Size() / 2048
+		}
+	}
+
+	return sizeIMB, sizeWMB, sizeEMB, nil
 }
