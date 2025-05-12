@@ -1,0 +1,25 @@
+DB_HOST="..."                              # IP расположения БД
+DB_HOST_PORT="..."                         # порт подключения
+DB_USER="..."                              # пользователь 
+DB_PASSWORD="..."                          # пароль
+DB_NAME="..."                              # имя БД
+DB_SSLMODE="disable"                       # режим SSL
+
+TABLE_SCHEMA="..."                         # схема расположения таблиц
+TABLE_HOST="..."                           # имя таблицы с конфигурацией хоста
+TABLE_DEVICES="..."                        # имя таблицы с конфигурацией устройств
+TABLE_TAGS="..."                           # имя таблицы с конфигурацией тэгов
+TABLE_DATA="..."                           # имя таблицы с архивом значений
+
+LOG_PATH="./LogServer/"                    # путь к расположению файлов лога
+
+IMPORT_FILE_NAME="./configs/import.xlsx"   # имя файла импорта от локальной директории
+
+EXPORT_FILE_PATH="./configs/"              # имя для файла импорта с указанием пути
+EXPORT_FILE_NAME="export"                  # имя файла экспорта
+EXPORT_FILE_TYPE=".xlsx"                   # тип файла экспорта
+
+HTTP_SERVER_IP="127.0.0.1"                 # IP HTTP сервера приложения
+HTTP_SERVER_PORT="50005"                   # Порт HTTP сервера приложения
+
+COM_PORT_PATH="/dev/"                      # расположение файлов СОМ портов
