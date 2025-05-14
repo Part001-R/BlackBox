@@ -1,9 +1,11 @@
 package database
 
 import (
+	"crypto/sha256"
 	"database/sql"
 	"fmt"
 	"os"
+	"unicode/utf8"
 
 	_ "github.com/lib/pq"
 )
@@ -72,7 +74,7 @@ func (db *DB_Object) CheckTablesExist() (bool, error) {
 		return false, fmt.Errorf("ошибка проверки присутствия таблицы: %s", err)
 	}
 	if !exist {
-		return false, fmt.Errorf("ошибка проверки присутствия таблицы: %s", err)
+		return false, fmt.Errorf("ошибка. нет такой таблицы: %s", err)
 	}
 
 	// Проверка присутствия таблицы - конфигурация
@@ -107,11 +109,27 @@ func (db *DB_Object) CheckTablesExist() (bool, error) {
 }
 
 // Функция выполняет создание таблиц в БД.
-func (db *DB_Object) CreateTables() (bool, error) {
+func (db *DB_Object) CreateTables() error {
+
+	// Создание таблицы - пользователи
+	Q := fmt.Sprintf(`
+	CREATE TABLE IF NOT EXISTS %s.%s (
+		id SERIAL PRIMARY KEY NOT NULL,
+		name VARCHAR(50) UNIQUE NOT NULL,
+		password VARCHAR(64),
+		timestamp TIMESTAMPTZ DEFAULT NOW()
+	);
+	`, os.Getenv("TABLE_SCHEMA"),
+		os.Getenv("TABLE_USERS"))
+
+	_, err := db.Ptr.Exec(Q)
+	if err != nil {
+		return fmt.Errorf("ошибка при создании таблицы: %s", err)
+	}
 
 	// Создание таблицы - настройки хоста
-	Q := fmt.Sprintf(`
-	CREATE TABLE IF NOT EXISTS %s (
+	Q = fmt.Sprintf(`
+	CREATE TABLE IF NOT EXISTS %s.%s (
 		id SERIAL PRIMARY KEY NOT NULL,
 		host VARCHAR(50) NOT NULL,
 		conType VARCHAR(50) NOT NULL,
@@ -123,16 +141,17 @@ func (db *DB_Object) CreateTables() (bool, error) {
 		stopbits VARCHAR(3),
 		timestamp TIMESTAMPTZ DEFAULT NOW()
 	);
-	`, os.Getenv("TABLE_HOST"))
+	`, os.Getenv("TABLE_SCHEMA"),
+		os.Getenv("TABLE_HOST"))
 
-	_, err := db.Ptr.Exec(Q)
+	_, err = db.Ptr.Exec(Q)
 	if err != nil {
-		return false, fmt.Errorf("ошибка при создании таблицы: %s", err)
+		return fmt.Errorf("ошибка при создании таблицы: %s", err)
 	}
 
 	// Создание таблицы - устройства
 	Q = fmt.Sprintf(`
-	CREATE TABLE IF NOT EXISTS %s (
+	CREATE TABLE IF NOT EXISTS %s.%s (
 		id SERIAL PRIMARY KEY NOT NULL,
 		device VARCHAR(50) NOT NULL,
 		comment VARCHAR(50) NOT NULL,
@@ -143,16 +162,17 @@ func (db *DB_Object) CreateTables() (bool, error) {
 		port VARCHAR(5) NOT NULL,
 		timestamp TIMESTAMPTZ DEFAULT NOW()
 	);
-	`, os.Getenv("TABLE_DEVICES"))
+	`, os.Getenv("TABLE_SCHEMA"),
+		os.Getenv("TABLE_DEVICES"))
 
 	_, err = db.Ptr.Exec(Q)
 	if err != nil {
-		return false, fmt.Errorf("ошибка при создании таблицы: %s", err)
+		return fmt.Errorf("ошибка при создании таблицы: %s", err)
 	}
 
 	// Создание таблицы - тэги
 	Q = fmt.Sprintf(`
-	CREATE TABLE IF NOT EXISTS %s (
+	CREATE TABLE IF NOT EXISTS %s.%s (
 		id SERIAL PRIMARY KEY NOT NULL,
 		device VARCHAR(50) NOT NULL,
 		address VARCHAR(50) NOT NULL,
@@ -163,16 +183,17 @@ func (db *DB_Object) CreateTables() (bool, error) {
 		format VARCHAR(30) NOT NULL,
 		timestamp TIMESTAMPTZ DEFAULT NOW()
 	);
-	`, os.Getenv("TABLE_TAGS"))
+	`, os.Getenv("TABLE_SCHEMA"),
+		os.Getenv("TABLE_TAGS"))
 
 	_, err = db.Ptr.Exec(Q)
 	if err != nil {
-		return false, fmt.Errorf("ошибка при создании таблицы: %s", err)
+		return fmt.Errorf("ошибка при создании таблицы: %s", err)
 	}
 
 	// Создание таблицы - архивные данные
 	Q = fmt.Sprintf(`
-	CREATE TABLE IF NOT EXISTS %s (
+	CREATE TABLE IF NOT EXISTS %s.%s (
 		id SERIAL PRIMARY KEY NOT NULL,
 		dev VARCHAR(50) NOT NULL,
 		name VARCHAR(50) NOT NULL,
@@ -180,23 +201,21 @@ func (db *DB_Object) CreateTables() (bool, error) {
 		qual NUMERIC NOT NULL,
 		timestamp TIMESTAMPTZ DEFAULT NOW()
 	);
-	`, os.Getenv("TABLE_DATA"))
+	`, os.Getenv("TABLE_SCHEMA"),
+		os.Getenv("TABLE_DATA"))
 
 	_, err = db.Ptr.Exec(Q)
 	if err != nil {
-		return false, fmt.Errorf("ошибка при создании таблицы: %s", err)
+		return fmt.Errorf("ошибка при создании таблицы: %s", err)
 	}
 
 	// Проверка присутствия созданных таблиц
-	ok, err := db.CheckTablesExist()
+	_, err = db.CheckTablesExist()
 	if err != nil {
-		return false, fmt.Errorf("ошибка проверки таблиц после их создания: %s", err)
-	}
-	if !ok {
-		return false, nil
+		return fmt.Errorf("ошибка проверки таблиц после их создания: %s", err)
 	}
 
-	return true, nil
+	return nil
 }
 
 // Внутренняя функция. Проверка присутствия таблицы по её имени.
@@ -220,4 +239,99 @@ func tableExists(db *DB_Object, schema, tableName string) (bool, error) {
 	}
 
 	return true, nil
+}
+
+// Функция создаёт пользователя admin, в таблице пользователей. Возвращается ошибка.
+func (db *DB_Object) AddUserTableDB(name string) error {
+
+	// Добавление пользователя admin
+	Q := fmt.Sprintf("INSERT INTO %s.%s (name, password) VALUES ($1, $2)",
+		os.Getenv("TABLE_SCHEMA"),
+		os.Getenv("TABLE_USERS"))
+
+	_, err := db.Ptr.Exec(Q, name, "")
+	if err != nil {
+		return fmt.Errorf("ошибка добавления пользователя admin: {%v}", err)
+	}
+
+	return nil
+}
+
+// Проверка и установка пароля (если его нет), для учетной записи admin. Возвращается ошибка.
+func (db *DB_Object) CheckSetUserPassword(name string) error {
+
+	psw, err := db.ReadPswUser(name)
+	if err != nil {
+		return fmt.Errorf("%v", err)
+	}
+
+	if utf8.RuneCountInString(psw) == 64 {
+		return nil
+	}
+
+	err = db.SetPswUser(name)
+	if err != nil {
+		return fmt.Errorf("%v", err)
+	}
+
+	return nil
+}
+
+// Чтение пароля пользователя. Возвращается хэш пароля и ошибка.
+//
+// Параметры:
+//
+// name - имя пользователя
+func (db *DB_Object) ReadPswUser(name string) (psw string, err error) {
+
+	q := fmt.Sprintf("SELECT password FROM %s.%s WHERE name = '%s'", os.Getenv("TABLE_SCHEMA"), os.Getenv("TABLE_USERS"), name)
+
+	err = db.Ptr.QueryRow(q).Scan(&psw)
+	if err != nil {
+		return "", fmt.Errorf("ошибка: {%v} при чтении пароля пользователя: {%s}", err, name)
+	}
+
+	return psw, nil
+}
+
+// Установка пароля пользователя. Возвращается ошибка.
+//
+// Параметры:
+//
+// name - имя пользователя
+func (db *DB_Object) SetPswUser(name string) error {
+
+	var psw1, psw2, pswHash string
+
+	fmt.Println()
+	fmt.Printf("Установка пароля для пользователя: %s\n", name)
+
+	for {
+		fmt.Println("---")
+		fmt.Print("Введите пароль: ")
+		fmt.Scanln(&psw1)
+		fmt.Print("Повторите пароль: ")
+		fmt.Scanln(&psw2)
+		if psw1 != psw2 {
+			fmt.Println("Ошибка при вводе пароля. Повторите попытку.")
+			continue
+		}
+
+		pswHash = fmt.Sprintf("%x", sha256.Sum256([]byte(psw1)))
+		break
+	}
+	fmt.Println("---")
+
+	q := fmt.Sprintf("UPDATE %s.%s SET password = '%s' WHERE name = '%s'",
+		os.Getenv("TABLE_SCHEMA"),
+		os.Getenv("TABLE_USERS"),
+		pswHash,
+		name)
+
+	_, err := db.Ptr.Exec(q)
+	if err != nil {
+		return fmt.Errorf("ошибка {%v} при обновлении пароля у пользователя: {%s}", err, name)
+	}
+
+	return nil
 }

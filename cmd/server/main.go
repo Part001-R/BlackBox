@@ -89,8 +89,8 @@ var (
 )
 
 const (
-	maxEthernetDev = 2
-	maxCOMDev      = 4
+	maxEthernetDev = 2 // Ограничение на количество устройств Ethernet у хоста
+	maxCOMDev      = 4 // Ограничение на количество устройств COM у хоста
 )
 
 // Точка входа
@@ -208,7 +208,7 @@ func run() {
 	//
 	switch slArg[0] {
 	case "--run":
-		fullRun() // полный запуск приложения
+		fullRun() // полный запуск приложения (опрос + архивирование в БД + HTTP(S))
 
 	case "--do":
 		switch slArg[1] {
@@ -227,12 +227,20 @@ func run() {
 		case "DB-erase":
 			doEraseDB() // очистка конфигурационных таблиц БД
 
+		case "USER-show":
+
+		case "USER-create":
+
+		case "USER-edit":
+
+		case "USER-delete":
+
 		case "Xlsx-show":
 			doXlsxShow() // вывод содержимого конфигурационного файла в терминал
 		}
 
 	default:
-		lgr.E.Println("ошибка в распозновании аргументов командной строки")
+		lgr.E.Println("ошибка в аргументах командной строки при запуске приложения")
 		os.Exit(1)
 	}
 }
@@ -397,18 +405,43 @@ func doDBcheck() {
 // Функция для создания таблиц в БД.
 func doDBcreate() {
 
-	ok, err := db.CreateTables()
-	if err != nil {
-		lgr.E.Println("ошибка при создании таблиц: ", err)
-	}
-
-	lgr.I.Println("выполнено создание таблиц:", ok)
-
+	// Предварительная проверка присутствия таблиц
+	ok, _ := db.CheckTablesExist()
 	if ok {
-		fmt.Println("ok")
+		fmt.Println("Таблицы БД присутствуют. Работа прервана")
 		return
 	}
-	fmt.Println("bad")
+
+	// Создание таблиц
+	err := db.CreateTables()
+	if err != nil {
+		lgr.E.Println("ошибка при создании таблиц: ", err)
+		fmt.Println("bad")
+		return
+	}
+	lgr.I.Println("выполнено создание таблиц")
+
+	// Добавление пользователя admin
+	var user = "admin"
+
+	err = db.AddUserTableDB(user)
+	if err != nil {
+		lgr.E.Println("ошибка при добавлении пользователя admin: ", err)
+		fmt.Println("bad")
+		return
+	}
+
+	// Установка пароля пользователю admin
+	err = db.CheckSetUserPassword(user)
+	if err != nil {
+		lgr.E.Println("ошибка установки пароля admin:", err)
+		fmt.Println("bad")
+		return
+	}
+
+	lgr.I.Println("Таблицы БД созданы")
+	lgr.I.Println("добавлен пользователь admin, установлен пароль")
+	fmt.Println("ok")
 }
 
 // Функция для импорта конфигурации в БД.
@@ -519,11 +552,11 @@ func wrConfDataDB() error {
 	// Запись конфигурации хоста
 	for _, el := range cnfImport.SheetMain_Header {
 
-		Q := fmt.Sprintf("INSERT INTO %s.%s (host, contype, address, port, baudrate, databits, parity, stopbits) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+		q := fmt.Sprintf("INSERT INTO %s.%s (host, contype, address, port, baudrate, databits, parity, stopbits) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
 			os.Getenv("TABLE_SCHEMA"),
 			os.Getenv("TABLE_HOST"))
 
-		_, err := db.Ptr.Exec(Q, el.Host, el.ConType, el.Address, el.Port, el.BaudRate, el.DataBits, el.Parity, el.StopBits)
+		_, err := db.Ptr.Exec(q, el.Host, el.ConType, el.Address, el.Port, el.BaudRate, el.DataBits, el.Parity, el.StopBits)
 		if err != nil {
 			lgr.E.Printf("ошибка {%v} при записи строки конфигурации хоста {%v}\n", err, el)
 			return err
@@ -535,11 +568,11 @@ func wrConfDataDB() error {
 	// Запись настроек подключений
 	for _, el := range cnfImport.SheetMain_Dev {
 
-		Q := fmt.Sprintf("INSERT INTO %s.%s (device, comment, host, type, address, ip, port) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+		q := fmt.Sprintf("INSERT INTO %s.%s (device, comment, host, type, address, ip, port) VALUES ($1, $2, $3, $4, $5, $6, $7)",
 			os.Getenv("TABLE_SCHEMA"),
 			os.Getenv("TABLE_DEVICES"))
 
-		_, err := db.Ptr.Exec(Q, el.Device, el.Comment, el.Host, el.Type_, el.Address, el.IP, el.Port)
+		_, err := db.Ptr.Exec(q, el.Device, el.Comment, el.Host, el.Type_, el.Address, el.IP, el.Port)
 		if err != nil {
 			lgr.E.Printf("ошибка {%v} при записи строки конфигурации подключения устройства {%v}\n", err, el)
 			return err
@@ -556,11 +589,11 @@ func wrConfDataDB() error {
 		// Проход по настройкам конфигурации каналов устройства
 		for _, ch := range d.Conf {
 
-			Q := fmt.Sprintf("INSERT INTO %s.%s (device, address, datatype, comment, timescan, functype, format ) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+			q := fmt.Sprintf("INSERT INTO %s.%s (device, address, datatype, comment, timescan, functype, format ) VALUES ($1, $2, $3, $4, $5, $6, $7)",
 				os.Getenv("TABLE_SCHEMA"),
 				os.Getenv("TABLE_TAGS"))
 
-			_, err := db.Ptr.Exec(Q, d.Name, ch.Address, ch.DataType, ch.Comment, ch.TimeScan, ch.FuncType, ch.Format)
+			_, err := db.Ptr.Exec(q, d.Name, ch.Address, ch.DataType, ch.Comment, ch.TimeScan, ch.FuncType, ch.Format)
 			if err != nil {
 				lgr.E.Printf("ошибка {%v} при записи строки конфигурации канала {%v}\n", err, ch)
 				return err
@@ -579,9 +612,9 @@ func wrConfDataDB() error {
 func rdConfDataDB() (conf libre.ConfXLSX_Export, err error) {
 
 	// Чтение конфигурации хоста
-	Q := fmt.Sprintf("SELECT host, contype, address, port, baudrate, databits, parity, stopbits FROM %s.%s", os.Getenv("TABLE_SCHEMA"), os.Getenv("TABLE_HOST"))
+	q := fmt.Sprintf("SELECT host, contype, address, port, baudrate, databits, parity, stopbits FROM %s.%s", os.Getenv("TABLE_SCHEMA"), os.Getenv("TABLE_HOST"))
 
-	rows, err := db.Ptr.Query(Q)
+	rows, err := db.Ptr.Query(q)
 	if err != nil {
 		lgr.E.Println("ошибка при чтении таблицы host: ", err)
 		return libre.ConfXLSX_Export{}, err
@@ -606,9 +639,9 @@ func rdConfDataDB() (conf libre.ConfXLSX_Export, err error) {
 	}
 
 	// Чтение конфигурации устройств
-	Q = fmt.Sprintf("SELECT device, comment, host, type, address, ip, port FROM %s.%s", os.Getenv("TABLE_SCHEMA"), os.Getenv("TABLE_DEVICES"))
+	q = fmt.Sprintf("SELECT device, comment, host, type, address, ip, port FROM %s.%s", os.Getenv("TABLE_SCHEMA"), os.Getenv("TABLE_DEVICES"))
 
-	rows, err = db.Ptr.Query(Q)
+	rows, err = db.Ptr.Query(q)
 	if err != nil {
 		lgr.E.Println("ошибка при чтении таблицы host: ", err)
 		return libre.ConfXLSX_Export{}, err
@@ -631,11 +664,11 @@ func rdConfDataDB() (conf libre.ConfXLSX_Export, err error) {
 	}
 
 	// Чтение конфигурации каналов
-	Q = fmt.Sprintf("SELECT device, address, datatype, comment, timescan, functype, format FROM %s.%s",
+	q = fmt.Sprintf("SELECT device, address, datatype, comment, timescan, functype, format FROM %s.%s",
 		os.Getenv("TABLE_SCHEMA"),
 		os.Getenv("TABLE_TAGS"))
 
-	rows, err = db.Ptr.Query(Q)
+	rows, err = db.Ptr.Query(q)
 	if err != nil {
 		lgr.E.Println("ошибка при чтении таблицы host: ", err)
 		return libre.ConfXLSX_Export{}, err
