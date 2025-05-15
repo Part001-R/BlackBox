@@ -117,6 +117,7 @@ func (db *DB_Object) CreateTables() error {
 		id SERIAL PRIMARY KEY NOT NULL,
 		name VARCHAR(50) UNIQUE NOT NULL,
 		password VARCHAR(64),
+		token VARCHAR(64),
 		timestamp TIMESTAMPTZ DEFAULT NOW()
 	);
 	`, os.Getenv("TABLE_SCHEMA"),

@@ -83,7 +83,7 @@ var (
 	lgr          loger.Log_Object
 	cnfImport    libre.ConfXLSX_Import
 	cmdArgs      map[string][]string
-	srvInfo      serverAPI.StatusServerT
+	srvInfo      serverAPI.StatusServerCallT
 	hostConnects connects
 	httpMutex    sync.Mutex
 )
@@ -2565,7 +2565,7 @@ func httpServer() {
 		httpMutex.Lock()
 		defer httpMutex.Unlock()
 
-		d := serverAPI.DataDB{
+		d := serverAPI.DataDBCall{
 			StartDate: "",
 			Data:      make([]serverAPI.DataEl, 0),
 		}
@@ -2586,6 +2586,8 @@ func httpServer() {
 		}
 
 		// Передача данных клиенту
+		d.DB = db.Ptr
+		d.Lgr = lgr
 		d.HandlExpDataDB(w, r)
 	})
 
@@ -2611,6 +2613,9 @@ func goHttpsServer() {
 		defer httpMutex.Unlock()
 
 		collectServInfo()
+
+		srvInfo.DB = db.Ptr
+		srvInfo.Lgr = lgr
 		srvInfo.HandlStatusSrv(w, r)
 	})
 
@@ -2619,7 +2624,7 @@ func goHttpsServer() {
 		httpMutex.Lock()
 		defer httpMutex.Unlock()
 
-		d := serverAPI.DataDB{
+		d := serverAPI.DataDBCall{
 			StartDate: "",
 			Data:      make([]serverAPI.DataEl, 0),
 		}
@@ -2639,8 +2644,18 @@ func goHttpsServer() {
 			return
 		}
 
-		// Передача данных клиенту
+		// Обработчик запроса
+		d.DB = db.Ptr
+		d.Lgr = lgr
 		d.HandlExpDataDB(w, r)
+	})
+
+	r.Post("/registration", func(w http.ResponseWriter, r *http.Request) {
+		var user serverAPI.LoginUser
+		user.DB = db.Ptr
+		user.Lgr = lgr
+
+		user.HandleHttpsRegistration(w, r)
 	})
 
 	// Запуск HTTPS сервера
@@ -2700,7 +2715,7 @@ func collectServInfo() {
 // Параметры:
 //
 // data - стартовая дата выборки и результат выборки.
-func readDataDB(data *serverAPI.DataDB) (err error) {
+func readDataDB(data *serverAPI.DataDBCall) (err error) {
 
 	// Проверка входных данных
 	if data == nil {
@@ -2732,7 +2747,7 @@ func readDataDB(data *serverAPI.DataDB) (err error) {
 // data - стартовая дата выборки и результат выборки.
 // limit - количество строк выборки.
 // offset - смещение выборки.
-func readDataDBReq(data *serverAPI.DataDB, limit, offset int) (size int, err error) {
+func readDataDBReq(data *serverAPI.DataDBCall, limit, offset int) (size int, err error) {
 
 	// Проверка указателя
 	if data == nil {
