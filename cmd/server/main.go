@@ -7,6 +7,7 @@ import (
 	modbusrtumaster "blackbox/internal/server/modbusRTUmaster"
 	modbustcpmaster "blackbox/internal/server/modbusTCPmaster"
 	serverAPI "blackbox/internal/server/serverAPI"
+	"blackbox/internal/server/users"
 	"context"
 	"errors"
 	"fmt"
@@ -143,7 +144,7 @@ func prepare() {
 	// Проверка набора аргументов командной строки
 	cmdArgs = make(map[string][]string)
 	cmdArgs["--run"] = []string{}
-	cmdArgs["--do"] = []string{"DB-check", "DB-create", "DB-import", "DB-export", "DB-erase", "Xlsx-show"}
+	cmdArgs["--do"] = []string{"DB-check", "DB-create", "DB-import", "DB-export", "DB-erase", "USERS", "Xlsx-show"}
 
 	err = checkArgs(os.Args)
 	if err != nil {
@@ -227,20 +228,19 @@ func run() {
 		case "DB-erase":
 			doEraseDB() // очистка конфигурационных таблиц БД
 
-		case "USER-show":
-
-		case "USER-create":
-
-		case "USER-edit":
-
-		case "USER-delete":
+		case "USERS":
+			doUsers() // взаимодействие с учётными данными пользователей
 
 		case "Xlsx-show":
 			doXlsxShow() // вывод содержимого конфигурационного файла в терминал
+
+		default:
+			lgr.E.Printf("нет соответствия во втором аргументе командной строки {%s}, при запуске приложения", slArg[1])
+			os.Exit(1)
 		}
 
 	default:
-		lgr.E.Println("ошибка в аргументах командной строки при запуске приложения")
+		lgr.E.Printf("нет соответствия в пермов аргументе командной строки {%s}, при запуске приложения", slArg[0])
 		os.Exit(1)
 	}
 }
@@ -321,7 +321,6 @@ func readArgs(arg []string) (argSl []string, err error) {
 				}
 			}
 		}
-
 	}
 
 	return nil, fmt.Errorf("%v", arg)
@@ -513,6 +512,173 @@ func doEraseDB() {
 
 	lgr.I.Println("очистка конфигурационных таблиц БД выполнена")
 	fmt.Println("ok")
+}
+
+// Функция взаимодействия с учётными данными пользователей
+func doUsers() {
+
+	users := users.UsersT{
+		DB:    db.Ptr,
+		Users: make([]users.UserT, 0),
+	}
+
+	fmt.Println()
+	fmt.Println("Работа с данными пользователей.")
+
+	users.MenuActionsUsers()
+
+	var numb int
+	fmt.Scan(&numb)
+
+	switch numb {
+	case 1: // Просмотр списка пользователей
+
+		err := users.ReqDataUsersDB()
+		if err != nil {
+			lgr.E.Printf("вывод информации о пользователях -> {%v}", err)
+			os.Exit(1)
+		}
+		users.ShowDataUsers()
+
+		lgr.I.Println("запрошены данные пользователей")
+
+	case 2: // Добавление пользователя
+		fmt.Println()
+		fmt.Println("Добавление нового пользователя")
+		fmt.Println()
+
+		// Ввод данных для нового пользователя
+		var userName, userPassword string
+		fmt.Print("Введите имя пользователя: ")
+		fmt.Scanln(&userName)
+		fmt.Print("Введите пароль пользователя: ")
+		userPassword, err := users.ReadTerminal()
+		if err != nil {
+			lgr.E.Printf("создание нового пользователя -> ошибка при считывании ввода пароля с терминала: {%v}", err)
+			os.Exit(1)
+		}
+
+		// Вычисление хэша пароля
+		fmt.Println()
+		fmt.Println("Данные приняты")
+		hashPwd, err := users.CalcHashPassword(userPassword)
+		if err != nil {
+			lgr.E.Printf("вычисление хэша пароля нового пользователя -> ошибка: {%v}", err)
+			os.Exit(1)
+		}
+
+		// Добавление в БД
+		err = users.AddUserDB(userName, hashPwd)
+		if err != nil {
+			lgr.E.Printf("добавление пользователя в БД -> ошибка: {%v}", err)
+			os.Exit(1)
+		}
+
+		fmt.Println()
+		fmt.Printf("Пользоваатель: {%s}, добавлен успешно.\n", userName)
+		lgr.I.Printf("Пользоваатель: {%s}, добавлен успешно.\n", userName)
+
+	case 3: // Удаление пользователя
+		fmt.Println()
+		fmt.Println("Удаленние пользователя")
+		fmt.Println()
+
+		// Ввод данных для удаления
+		var str string
+		fmt.Print("Введите id пользователя: ")
+		fmt.Scanln(&str)
+
+		userId, err := strconv.Atoi(str)
+		if err != nil {
+			lgr.E.Printf("удаление пользователя по его id -> ошибка распознавания номера: {%v}", err)
+			os.Exit(1)
+		}
+
+		// Удаление пользователя
+		err = users.DelUserDB(userId)
+		if err != nil {
+			lgr.E.Printf("удаление пользователя по его id -> ошибка удаления: {%v}\n", err)
+			os.Exit(1)
+		}
+
+		fmt.Println()
+		fmt.Printf("Пользователь с id:{%d}, удалён\n", userId)
+		lgr.I.Printf("Пользователь с id:{%d}, удалён\n", userId)
+
+	case 4: // Изменение имени пользователя
+		fmt.Println()
+		fmt.Println("Изменение имени пользователя")
+		fmt.Println()
+
+		var strId string
+		fmt.Print("Введите id пользователя: ")
+		fmt.Scanln(&strId)
+		userId, err := strconv.Atoi(strId)
+		if err != nil {
+			lgr.E.Printf("удаление пользователя по его id -> ошибка распознавания номера: {%v}", err)
+			os.Exit(1)
+		}
+
+		var newName string
+		fmt.Print("Введите новое имя пользователя: ")
+		fmt.Scanln(&newName)
+
+		err = users.ChgUserNameDB(userId, newName)
+		if err != nil {
+			lgr.E.Printf("изменение имени пользователя id:{%d} -> ошибка:{%v}", userId, err)
+			os.Exit(1)
+		}
+
+		fmt.Println()
+		fmt.Printf("Имя пользователя с id:{%d}, изменено\n", userId)
+		lgr.I.Printf("Имя пользователя с id:{%d}, изменено\n", userId)
+
+	case 5: // Изменение пароля пользователя
+		fmt.Println()
+		fmt.Println("Изменение пароля пользователя")
+		fmt.Println()
+
+		var strId string
+		fmt.Print("Введите id пользователя: ")
+		fmt.Scanln(&strId)
+		userId, err := strconv.Atoi(strId)
+		if err != nil {
+			lgr.E.Printf("удаление пользователя по его id -> ошибка распознавания номера: {%v}", err)
+			os.Exit(1)
+		}
+
+		fmt.Print("Введите пароль пользователя: ")
+		userPassword, err := users.ReadTerminal()
+		if err != nil {
+			lgr.E.Printf("создание нового пользователя -> ошибка при считывании ввода пароля с терминала: {%v}", err)
+			os.Exit(1)
+		}
+		hashPwd, err := users.CalcHashPassword(userPassword)
+		if err != nil {
+			lgr.E.Printf("вычисление хэша пароля нового пользователя -> ошибка: {%v}", err)
+			os.Exit(1)
+		}
+		fmt.Println()
+
+		err = users.ChgUserPasswordDB(userId, hashPwd)
+		if err != nil {
+			lgr.E.Printf("изменение пароля пользователя по id:{%d} -> ошибка: {%v}", userId, err)
+			os.Exit(1)
+		}
+
+		fmt.Println()
+		fmt.Printf("Пароль пользователя с id:{%d}, изменен\n", userId)
+		lgr.I.Printf("Пароль пользователя с id:{%d}, изменен\n", userId)
+
+	case 6: // Завершение работы
+		fmt.Println()
+		fmt.Println("Работа с пользователями, завершена")
+		fmt.Println()
+
+	default:
+		fmt.Println("Ошибка при вводе. Работа завершена")
+		os.Exit(1)
+	}
 }
 
 // Функция для экспорта конфигурации из БД.
