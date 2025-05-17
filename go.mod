@@ -11,6 +11,7 @@ require (
 	github.com/lib/pq v1.10.9
 	github.com/thinkgos/gomodbus/v2 v2.2.2
 	github.com/xuri/excelize/v2 v2.9.0
+	golang.org/x/term v0.32.0
 )
 
 require (
@@ -23,6 +24,5 @@ require (
 	golang.org/x/crypto v0.28.0 // indirect
 	golang.org/x/net v0.30.0 // indirect
 	golang.org/x/sys v0.33.0 // indirect
-	golang.org/x/term v0.32.0 // indirect
 	golang.org/x/text v0.19.0 // indirect
 )

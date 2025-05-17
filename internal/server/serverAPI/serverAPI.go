@@ -84,27 +84,38 @@ func (el *StatusServerCallT) HandlStatusSrv(w http.ResponseWriter, r *http.Reque
 
 	w.Header().Set("Content-Type", "application/json")
 
+	// Чтение заголовков звпроса
 	token := r.Header.Get("authorization")
-
 	if token == "" {
-		el.Lgr.W.Println("https-status -> нет токена")
+		el.Lgr.W.Println("https-status -> нет токена, в запроск")
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
 
-	name, err := readUserNameByTokenDB(token, el.DB)
-	if err != nil {
-		el.Lgr.E.Println("https-status -> ошибка при получении имени пользователя по принятому токену")
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-		return
-	}
-
+	// Чтение параметров запроса
+	queryParams := r.URL.Query()
+	name := queryParams.Get("name")
 	if name == "" {
-		el.Lgr.W.Println("https-status -> пустое имя по принятому токену")
+		el.Lgr.W.Println("https-status -> нет имени пользователя, в запросе")
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
 
+	// Проверка, что принятое имя и его токен соответствуют
+	tokenDB, err := readUserTokenByNameDB(name, el.DB)
+	if err != nil {
+		el.Lgr.W.Printf("https-status -> ошибка при получении токена, по имени пользователя {%v}", err)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	if token != tokenDB {
+		el.Lgr.W.Println("https-status -> принятый токен и токен из БД не соответствуют")
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	// Подготовка данных для отправки
 	var statusServer StatusT
 
 	statusServer.TimeStart = el.TimeStart
@@ -118,6 +129,7 @@ func (el *StatusServerCallT) HandlStatusSrv(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Передача данных
 	el.Lgr.I.Printf("https-status -> пользователь {%s} запросил состояние сервера", name)
 	w.WriteHeader(http.StatusOK)
 	w.Write(resp)
@@ -128,27 +140,38 @@ func (el *DataDBCall) HandlExpDataDB(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 
+	// Чтение заголовка
 	token := r.Header.Get("authorization")
-
 	if token == "" {
 		el.Lgr.W.Println("https-dataDB -> нет токена")
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
 
-	name, err := readUserNameByTokenDB(token, el.DB)
-	if err != nil {
-		el.Lgr.E.Println("https-dataDB -> ошибка при получении имени пользователя по принятому токену")
-		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-		return
-	}
-
+	// Чтение параметров запроса
+	qPrm := r.URL.Query()
+	name := qPrm.Get("name")
 	if name == "" {
-		el.Lgr.W.Println("https-dataDB -> пустое имя по принятому токену")
+		el.Lgr.W.Println("https-dataDB -> нет данных по параметру name")
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
 
+	// Проверка, что принятое имя и его токен соответствуют
+	tokenDB, err := readUserTokenByNameDB(name, el.DB)
+	if err != nil {
+		el.Lgr.W.Printf("https-dataDB -> ошибка при получении токена, по имени пользователя {%v}", err)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	if token != tokenDB {
+		el.Lgr.W.Println("https-dataDB -> принятый токен и токен из БД не соответствуют")
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	// Подготовка данных для ответа
 	var data DataDB
 	data.StartDate = el.StartDate
 	data.Data = el.Data
@@ -156,6 +179,7 @@ func (el *DataDBCall) HandlExpDataDB(w http.ResponseWriter, r *http.Request) {
 	resp, err := json.Marshal(data)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
 	}
 
 	el.Lgr.I.Printf("https-dataDB -> пользователь {%s} запросил архивные данные на %s", name, el.StartDate)
@@ -244,7 +268,7 @@ func readPswUserDB(name string, db *sql.DB) (psw string, err error) {
 	return psw, nil
 }
 
-// Получение имени пользователя по его токену Возвращается имя и ошибка.
+// Получение имени пользователя по его токену. Возвращается имя и ошибка.
 //
 // Параметры:
 //
@@ -262,6 +286,26 @@ func readUserNameByTokenDB(token string, db *sql.DB) (name string, err error) {
 	}
 
 	return name, nil
+}
+
+// Получение токена по имени пользователя. Возвращается токен и ошибка.
+//
+// Параметры:
+//
+// token - токен пользователя
+// db - указатель на БД
+func readUserTokenByNameDB(name string, db *sql.DB) (token string, err error) {
+
+	q := fmt.Sprintf("SELECT token FROM %s.%s WHERE name = $1",
+		os.Getenv("TABLE_SCHEMA"),
+		os.Getenv("TABLE_USERS"))
+
+	err = db.QueryRow(q, name).Scan(&token)
+	if err != nil {
+		return "", errors.New("ошибка: при порлучении токена, по имени пользователя")
+	}
+
+	return token, nil
 }
 
 // Генерация токена. Возвращается токен

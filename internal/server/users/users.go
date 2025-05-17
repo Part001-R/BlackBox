@@ -93,7 +93,6 @@ func (el *UsersT) ShowDataUsers() {
 	for _, v := range el.Users {
 		fmt.Printf("id:%d  name:%s  password:%s  token:%s\n", v.Id, v.Name, v.Password, v.Token)
 	}
-	fmt.Println()
 }
 
 // Функция вычисляет хэш пароля. Возвращает ошибку.
@@ -227,4 +226,79 @@ func (el *UsersT) ChgUserPasswordDB(id int, hashPwd string) error {
 	}
 
 	return nil
+}
+
+// Функция получает имя пользователя по его id. Возвращает имя пользователя и ошибку.
+//
+// Параметры:
+//
+// id - id пользователя в БД
+func (el *UsersT) UserNameByIdDB(id int) (name string, err error) {
+
+	if id < 1 {
+		return "", fmt.Errorf("получение имени пользоателя по id -> ошибка: id = {%d}", id)
+	}
+
+	q := fmt.Sprintf("SELECT name FROM %s.%s WHERE id=$1",
+		os.Getenv("TABLE_SCHEMA"),
+		os.Getenv("TABLE_USERS"))
+
+	qRow := el.DB.QueryRow(q, id)
+
+	err = qRow.Scan(&name)
+	if err != nil {
+		return "", fmt.Errorf("ошибка при чтении имени пользователя из ответа на запрос к БД: {%v}", err)
+	}
+
+	return name, nil
+}
+
+// Функция получает хэш пароля по его id. Возвращает хэш пароля и ошибку.
+//
+// Параметры:
+//
+// id - id пользователя в БД
+func (el *UsersT) UserPasswordByIdDB(id int) (name string, err error) {
+
+	if id < 1 {
+		return "", fmt.Errorf("получение хэша пароля пользоателя, по id -> ошибка: id = {%d}", id)
+	}
+
+	q := fmt.Sprintf("SELECT password FROM %s.%s WHERE id=$1",
+		os.Getenv("TABLE_SCHEMA"),
+		os.Getenv("TABLE_USERS"))
+
+	qRow := el.DB.QueryRow(q, id)
+
+	err = qRow.Scan(&name)
+	if err != nil {
+		return "", fmt.Errorf("ошибка при чтении хэша пароля пользователя, из ответа на запрос к БД: {%v}", err)
+	}
+
+	return name, nil
+}
+
+// Функция запрашивает повторение меню. Возвращает true/false для повторения и ошибку.
+func (el *UsersT) RepeatMenu() (b bool, err error) {
+
+	var yn string
+
+	for {
+		fmt.Println()
+		fmt.Print("Продолжить работу? (Y/N): ")
+		_, err := fmt.Scanln(&yn)
+		if err != nil {
+			return false, fmt.Errorf("запрос повтора вывода меню -> ошибка:{%v}", err)
+		}
+
+		if yn == "Y" {
+			return true, nil
+		}
+		if yn == "N" {
+			return false, nil
+		}
+
+		fmt.Println("Ошибка при вводе.")
+		continue
+	}
 }

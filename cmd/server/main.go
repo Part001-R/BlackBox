@@ -525,160 +525,354 @@ func doUsers() {
 	fmt.Println()
 	fmt.Println("Работа с данными пользователей.")
 
-	users.MenuActionsUsers()
+	for {
+		users.MenuActionsUsers()
+		var numb int
+		fmt.Scan(&numb)
 
-	var numb int
-	fmt.Scan(&numb)
+		switch numb {
+		case 1: // Просмотр списка пользователей
 
-	switch numb {
-	case 1: // Просмотр списка пользователей
+			fmt.Println()
+			fmt.Println("=====================================")
+			fmt.Println("=== Просмотр списка пользователей ===")
+			fmt.Println("=====================================")
 
-		err := users.ReqDataUsersDB()
-		if err != nil {
-			lgr.E.Printf("вывод информации о пользователях -> {%v}", err)
+			err := users.ReqDataUsersDB()
+			if err != nil {
+				lgr.E.Printf("вывод информации о пользователях -> {%v}", err)
+				fmt.Println("Ошибка")
+				continue
+			}
+			users.ShowDataUsers()
+
+			lgr.I.Println("запрошены данные пользователей")
+
+			// Запрос повторного вывода меню
+			repeat, err := users.RepeatMenu()
+			if err != nil {
+				lgr.E.Printf("вывод информации о пользователях -> ошибка:{%v}", err)
+				fmt.Println("Ошибка")
+				continue
+			}
+			if repeat {
+				continue
+			}
+			return
+
+		case 2: // Добавление пользователя
+
+			fmt.Println()
+			fmt.Println("===============================")
+			fmt.Println("=== Добавление пользователя ===")
+			fmt.Println("===============================")
+			fmt.Println()
+
+			// Ввод данных для нового пользователя
+			var userName, userPassword string
+			fmt.Print("Введите имя пользователя: ")
+			fmt.Scanln(&userName)
+
+			if userName == "admin" {
+				fmt.Printf("Пользователя с именем: {%s}, запрещено добавлять\n", userName)
+				continue
+			}
+
+			// Ввод пароля
+			fmt.Print("Введите пароль пользователя: ")
+			userPassword, err := users.ReadTerminal()
+			if err != nil {
+				lgr.E.Printf("создание нового пользователя -> ошибка при считывании ввода пароля с терминала: {%v}", err)
+				fmt.Println("Ошибка")
+				continue
+			}
+			fmt.Println()
+			fmt.Print("Повторите пароль пользователя: ")
+			userPassword2, err := users.ReadTerminal()
+			if err != nil {
+				lgr.E.Printf("создание нового пользователя -> ошибка при считывании ввода пароля с терминала: {%v}", err)
+				fmt.Println("Ошибка")
+				continue
+			}
+			fmt.Println()
+			if userPassword != userPassword2 {
+				lgr.W.Println("создание нового пользователя -> ошибка подтверждения пароля")
+				fmt.Println("Нет соответствия при вводе пароля. Пользователь не создан.")
+				continue
+			}
+
+			// Вычисление хэша пароля
+			fmt.Println()
+			fmt.Println("Данные приняты")
+			hashPwd, err := users.CalcHashPassword(userPassword)
+			if err != nil {
+				lgr.E.Printf("вычисление хэша пароля нового пользователя -> ошибка: {%v}", err)
+				fmt.Println("Ошибка")
+				continue
+			}
+
+			// Добавление в БД
+			err = users.AddUserDB(userName, hashPwd)
+			if err != nil {
+				lgr.E.Printf("добавление пользователя в БД -> ошибка: {%v}", err)
+				fmt.Println("Ошибка")
+				continue
+			}
+
+			fmt.Println()
+			fmt.Printf("Пользоваатель: {%s}, добавлен успешно.\n", userName)
+			lgr.I.Printf("Пользоваатель: {%s}, добавлен успешно.\n", userName)
+
+			// Запрос повторного вывода меню
+			repeat, err := users.RepeatMenu()
+			if err != nil {
+				lgr.E.Printf("вывод информации о пользователях -> ошибка:{%v}", err)
+				fmt.Println("Ошибка")
+				continue
+			}
+			if repeat {
+				continue
+			}
+			return
+
+		case 3: // Удаление пользователя
+
+			fmt.Println()
+			fmt.Println("==============================")
+			fmt.Println("=== Удаленние пользователя ===")
+			fmt.Println("==============================")
+			fmt.Println()
+
+			// Ввод данных для удаления
+			var str string
+			fmt.Print("Введите id пользователя: ")
+			fmt.Scanln(&str)
+
+			userId, err := strconv.Atoi(str)
+			if err != nil {
+				lgr.E.Printf("удаление пользователя по его id -> ошибка распознавания номера: {%v}", err)
+				fmt.Println("Ошибка")
+				continue
+			}
+
+			// Проверка, что удаляемый пользователь - admin
+			userName, err := users.UserNameByIdDB(userId)
+			if err != nil {
+				lgr.W.Printf("Удаление пользователя -> ошибка: {%v}", err)
+				fmt.Println("Ошибка. Работа прервана")
+				continue
+			}
+
+			if userName == "admin" {
+				fmt.Printf("Пользователя с именем: {%s}, запрещено удалять\n", userName)
+				continue
+			}
+
+			// Удаление пользователя
+			err = users.DelUserDB(userId)
+			if err != nil {
+				lgr.E.Printf("удаление пользователя по его id -> ошибка удаления: {%v}\n", err)
+				fmt.Println("Ошибка")
+				continue
+			}
+
+			fmt.Println()
+			fmt.Printf("Пользователь с id:{%d}, удалён\n", userId)
+			lgr.I.Printf("Пользователь с id:{%d}, удалён\n", userId)
+
+			// Запрос повторного вывода меню
+			repeat, err := users.RepeatMenu()
+			if err != nil {
+				lgr.E.Printf("вывод информации о пользователях -> ошибка:{%v}", err)
+				fmt.Println("Ошибка")
+				continue
+			}
+			if repeat {
+				continue
+			}
+			return
+
+		case 4: // Изменение имени пользователя
+			fmt.Println()
+			fmt.Println("====================================")
+			fmt.Println("=== Изменение имени пользователя ===")
+			fmt.Println("====================================")
+			fmt.Println()
+
+			var strId string
+			fmt.Print("Введите id пользователя: ")
+			fmt.Scanln(&strId)
+			userId, err := strconv.Atoi(strId)
+			if err != nil {
+				lgr.E.Printf("удаление пользователя по его id -> ошибка распознавания номера: {%v}", err)
+				fmt.Println("Ошибка")
+				continue
+			}
+
+			// Проверка, что пользователь - admin
+			userName, err := users.UserNameByIdDB(userId)
+			if err != nil {
+				lgr.W.Printf("Удаление пользователя -> ошибка: {%v}", err)
+				fmt.Println("Ошибка. Работа прервана")
+				continue
+			}
+
+			if userName == "admin" {
+				fmt.Printf("Запрещено менять имя у пользователя: {%s}\n", userName)
+				continue
+			}
+
+			var newName string
+			fmt.Print("Введите новое имя пользователя: ")
+			fmt.Scanln(&newName)
+
+			err = users.ChgUserNameDB(userId, newName)
+			if err != nil {
+				lgr.E.Printf("изменение имени пользователя id:{%d} -> ошибка:{%v}", userId, err)
+				fmt.Println("Ошибка")
+				continue
+			}
+
+			fmt.Println()
+			fmt.Printf("Имя пользователя с id:{%d}, изменено\n", userId)
+			lgr.I.Printf("Имя пользователя с id:{%d}, изменено\n", userId)
+
+			// Запрос повторного вывода меню
+			repeat, err := users.RepeatMenu()
+			if err != nil {
+				lgr.E.Printf("вывод информации о пользователях -> ошибка:{%v}", err)
+				return
+			}
+			if repeat {
+				continue
+			}
+			return
+
+		case 5: // Изменение пароля пользователя
+			fmt.Println()
+			fmt.Println("=====================================")
+			fmt.Println("=== Изменение пароля пользователя ===")
+			fmt.Println("=====================================")
+			fmt.Println()
+
+			var strId string
+			fmt.Print("Введите id пользователя: ")
+			fmt.Scanln(&strId)
+			userId, err := strconv.Atoi(strId)
+			if err != nil {
+				lgr.E.Printf("удаление пользователя по его id -> ошибка распознавания номера: {%v}", err)
+				fmt.Println("Ошибка")
+				continue
+			}
+
+			// Проверка, что пользователь - admin
+			userName, err := users.UserNameByIdDB(userId)
+			if err != nil {
+				lgr.W.Printf("Удаление пользователя -> ошибка: {%v}", err)
+				fmt.Println("Ошибка")
+				continue
+			}
+
+			// Ввод пароля
+			fmt.Print("Введите новый пароль пользователя: ")
+			userPassword, err := users.ReadTerminal()
+			if err != nil {
+				lgr.E.Printf("создание нового пользователя -> ошибка при считывании ввода пароля с терминала: {%v}", err)
+				fmt.Println("Ошибка")
+				continue
+			}
+			fmt.Println()
+
+			fmt.Print("Повторите новый пароль пользователя: ")
+			userPassword2, err := users.ReadTerminal()
+			if err != nil {
+				lgr.E.Printf("создание нового пользователя -> ошибка при считывании ввода пароля с терминала: {%v}", err)
+				fmt.Println("Ошибка")
+				continue
+			}
+			fmt.Println()
+
+			if userPassword != userPassword2 {
+				lgr.I.Println("создание нового пользователя -> нет соответствия паролей при повторном вводе")
+				fmt.Println("Ошибка")
+				continue
+			}
+
+			// Генерация хэш пароля
+			hashPwd, err := users.CalcHashPassword(userPassword2)
+			if err != nil {
+				lgr.E.Printf("вычисление хэша пароля нового пользователя -> ошибка: {%v}", err)
+				fmt.Println("Ошибка")
+				continue
+			}
+			fmt.Println()
+
+			// Если пользователь - admin. Проверка действующего пароля.
+			if userName == "admin" {
+				hashPwdExist, err := users.UserPasswordByIdDB(userId)
+				if err != nil {
+					lgr.W.Printf("Удаление пользователя -> ошибка: {%v}", err)
+					fmt.Println("Ошибка")
+					continue
+				}
+				fmt.Print("Введите действующий пароль: ")
+				pwdExist, err := users.ReadTerminal()
+				if err != nil {
+					lgr.E.Printf("создание нового пользователя -> ошибка при считывании ввода пароля с терминала: {%v}", err)
+					fmt.Println("Ошибка")
+					continue
+				}
+				fmt.Println()
+				hashPwd, err := users.CalcHashPassword(pwdExist)
+				if err != nil {
+					lgr.E.Printf("вычисление хэша пароля нового пользователя -> ошибка: {%v}", err)
+					fmt.Println("Ошибка")
+					continue
+				}
+				fmt.Println()
+
+				if hashPwdExist != hashPwd {
+					lgr.W.Printf("изменение пароля для пользователя:{%s} -> действующий пароль не подтверждён", userName)
+					fmt.Println("Ошибка")
+					continue
+				}
+			}
+
+			// Изменение пароля в БД
+			err = users.ChgUserPasswordDB(userId, hashPwd)
+			if err != nil {
+				lgr.E.Printf("изменение пароля пользователя по id:{%d} -> ошибка: {%v}", userId, err)
+				fmt.Println("Ошибка")
+				continue
+			}
+
+			fmt.Printf("Пароль пользователя с id:{%d}, изменен\n", userId)
+			lgr.I.Printf("Пароль пользователя с id:{%d}, изменен\n", userId)
+
+			// Запрос повторного вывода меню
+			repeat, err := users.RepeatMenu()
+			if err != nil {
+				lgr.E.Printf("вывод информации о пользователях -> ошибка:{%v}", err)
+				fmt.Println("Ошибка")
+				continue
+			}
+			if repeat {
+				continue
+			}
+			return
+
+		case 6: // Завершение работы
+			fmt.Println()
+			fmt.Println("Работа с пользователями, завершена")
+			fmt.Println()
+			return
+
+		default:
+			fmt.Println("Ошибка при вводе. Работа завершена")
 			os.Exit(1)
 		}
-		users.ShowDataUsers()
-
-		lgr.I.Println("запрошены данные пользователей")
-
-	case 2: // Добавление пользователя
-		fmt.Println()
-		fmt.Println("Добавление нового пользователя")
-		fmt.Println()
-
-		// Ввод данных для нового пользователя
-		var userName, userPassword string
-		fmt.Print("Введите имя пользователя: ")
-		fmt.Scanln(&userName)
-		fmt.Print("Введите пароль пользователя: ")
-		userPassword, err := users.ReadTerminal()
-		if err != nil {
-			lgr.E.Printf("создание нового пользователя -> ошибка при считывании ввода пароля с терминала: {%v}", err)
-			os.Exit(1)
-		}
-
-		// Вычисление хэша пароля
-		fmt.Println()
-		fmt.Println("Данные приняты")
-		hashPwd, err := users.CalcHashPassword(userPassword)
-		if err != nil {
-			lgr.E.Printf("вычисление хэша пароля нового пользователя -> ошибка: {%v}", err)
-			os.Exit(1)
-		}
-
-		// Добавление в БД
-		err = users.AddUserDB(userName, hashPwd)
-		if err != nil {
-			lgr.E.Printf("добавление пользователя в БД -> ошибка: {%v}", err)
-			os.Exit(1)
-		}
-
-		fmt.Println()
-		fmt.Printf("Пользоваатель: {%s}, добавлен успешно.\n", userName)
-		lgr.I.Printf("Пользоваатель: {%s}, добавлен успешно.\n", userName)
-
-	case 3: // Удаление пользователя
-		fmt.Println()
-		fmt.Println("Удаленние пользователя")
-		fmt.Println()
-
-		// Ввод данных для удаления
-		var str string
-		fmt.Print("Введите id пользователя: ")
-		fmt.Scanln(&str)
-
-		userId, err := strconv.Atoi(str)
-		if err != nil {
-			lgr.E.Printf("удаление пользователя по его id -> ошибка распознавания номера: {%v}", err)
-			os.Exit(1)
-		}
-
-		// Удаление пользователя
-		err = users.DelUserDB(userId)
-		if err != nil {
-			lgr.E.Printf("удаление пользователя по его id -> ошибка удаления: {%v}\n", err)
-			os.Exit(1)
-		}
-
-		fmt.Println()
-		fmt.Printf("Пользователь с id:{%d}, удалён\n", userId)
-		lgr.I.Printf("Пользователь с id:{%d}, удалён\n", userId)
-
-	case 4: // Изменение имени пользователя
-		fmt.Println()
-		fmt.Println("Изменение имени пользователя")
-		fmt.Println()
-
-		var strId string
-		fmt.Print("Введите id пользователя: ")
-		fmt.Scanln(&strId)
-		userId, err := strconv.Atoi(strId)
-		if err != nil {
-			lgr.E.Printf("удаление пользователя по его id -> ошибка распознавания номера: {%v}", err)
-			os.Exit(1)
-		}
-
-		var newName string
-		fmt.Print("Введите новое имя пользователя: ")
-		fmt.Scanln(&newName)
-
-		err = users.ChgUserNameDB(userId, newName)
-		if err != nil {
-			lgr.E.Printf("изменение имени пользователя id:{%d} -> ошибка:{%v}", userId, err)
-			os.Exit(1)
-		}
-
-		fmt.Println()
-		fmt.Printf("Имя пользователя с id:{%d}, изменено\n", userId)
-		lgr.I.Printf("Имя пользователя с id:{%d}, изменено\n", userId)
-
-	case 5: // Изменение пароля пользователя
-		fmt.Println()
-		fmt.Println("Изменение пароля пользователя")
-		fmt.Println()
-
-		var strId string
-		fmt.Print("Введите id пользователя: ")
-		fmt.Scanln(&strId)
-		userId, err := strconv.Atoi(strId)
-		if err != nil {
-			lgr.E.Printf("удаление пользователя по его id -> ошибка распознавания номера: {%v}", err)
-			os.Exit(1)
-		}
-
-		fmt.Print("Введите пароль пользователя: ")
-		userPassword, err := users.ReadTerminal()
-		if err != nil {
-			lgr.E.Printf("создание нового пользователя -> ошибка при считывании ввода пароля с терминала: {%v}", err)
-			os.Exit(1)
-		}
-		hashPwd, err := users.CalcHashPassword(userPassword)
-		if err != nil {
-			lgr.E.Printf("вычисление хэша пароля нового пользователя -> ошибка: {%v}", err)
-			os.Exit(1)
-		}
-		fmt.Println()
-
-		err = users.ChgUserPasswordDB(userId, hashPwd)
-		if err != nil {
-			lgr.E.Printf("изменение пароля пользователя по id:{%d} -> ошибка: {%v}", userId, err)
-			os.Exit(1)
-		}
-
-		fmt.Println()
-		fmt.Printf("Пароль пользователя с id:{%d}, изменен\n", userId)
-		lgr.I.Printf("Пароль пользователя с id:{%d}, изменен\n", userId)
-
-	case 6: // Завершение работы
-		fmt.Println()
-		fmt.Println("Работа с пользователями, завершена")
-		fmt.Println()
-
-	default:
-		fmt.Println("Ошибка при вводе. Работа завершена")
-		os.Exit(1)
 	}
+
 }
 
 // Функция для экспорта конфигурации из БД.
