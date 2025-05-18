@@ -139,6 +139,8 @@ func expDataDB(startDate string) error {
 		return fmt.Errorf("ошибка запроса архивных данных ДБ: {%v}", err)
 	}
 
+	fmt.Printf("принято %s строк\n", dataDB.CntStr)
+
 	// Формирование Exlx файла данных
 	err = saveDataXlsx(dataDB)
 	if err != nil {

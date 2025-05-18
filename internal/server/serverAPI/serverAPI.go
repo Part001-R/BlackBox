@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"time"
 
 	"database/sql"
@@ -56,6 +57,7 @@ type (
 	// Для передачи архивных данных БД
 	DataDBCall struct {
 		StartDate string
+		CntStrDB  int
 		Data      []DataEl
 		DB        *sql.DB
 		Lgr       loger.Log_Object
@@ -80,7 +82,7 @@ type (
 )
 
 // Обработчик запроса на предоставление состояния Go рутин
-func (el *StatusServerCallT) HandlStatusSrv(w http.ResponseWriter, r *http.Request) {
+func (el *StatusServerCallT) HandlHttpsStatusSrv(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 
@@ -135,8 +137,33 @@ func (el *StatusServerCallT) HandlStatusSrv(w http.ResponseWriter, r *http.Reque
 	w.Write(resp)
 }
 
+// Обработчик запроса на предоставление состояния Go рутин
+func (el *StatusServerCallT) HandlHttpStatusSrv(w http.ResponseWriter, r *http.Request) {
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Подготовка данных для отправки
+	var statusServer StatusT
+
+	statusServer.TimeStart = el.TimeStart
+	statusServer.MbRTU = el.MbRTU
+	statusServer.MbTCP = el.MbTCP
+	statusServer.SizeF = el.SizeF
+
+	resp, err := json.Marshal(statusServer)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	// Передача данных
+	el.Lgr.I.Printf("http-status -> локальный запрос состояние сервера")
+	w.WriteHeader(http.StatusOK)
+	w.Write(resp)
+}
+
 // Обработчик запроса на экспорт архивных данных БД
-func (el *DataDBCall) HandlExpDataDB(w http.ResponseWriter, r *http.Request) {
+func (el *DataDBCall) HandlHttpsExpDataDB(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 
@@ -171,6 +198,9 @@ func (el *DataDBCall) HandlExpDataDB(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	cntStr := strconv.Itoa(el.CntStrDB)
+	w.Header().Set("Count-Strings", cntStr)
+
 	// Подготовка данных для ответа
 	var data DataDB
 	data.StartDate = el.StartDate
@@ -188,8 +218,33 @@ func (el *DataDBCall) HandlExpDataDB(w http.ResponseWriter, r *http.Request) {
 
 }
 
+// Обработчик запроса на экспорт архивных данных БД
+func (el *DataDBCall) HandlHttpExpDataDB(w http.ResponseWriter, r *http.Request) {
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Подготовка данных для ответа
+	var data DataDB
+	data.StartDate = el.StartDate
+	data.Data = el.Data
+
+	cntStr := strconv.Itoa(el.CntStrDB)
+	w.Header().Set("Count-Strings", cntStr)
+
+	resp, err := json.Marshal(data)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	el.Lgr.I.Println("http-dataDB -> локальный запрос исторических данных")
+	w.WriteHeader(http.StatusOK)
+	w.Write(resp)
+
+}
+
 // Обработчик регистрации пользователя на https сервере
-func (el *LoginUser) HandleHttpsRegistration(w http.ResponseWriter, r *http.Request) {
+func (el *LoginUser) HandlHttpsRegistration(w http.ResponseWriter, r *http.Request) {
 
 	rcvStr, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -292,7 +347,7 @@ func readUserNameByTokenDB(token string, db *sql.DB) (name string, err error) {
 //
 // Параметры:
 //
-// token - токен пользователя
+// name - имя пользователя
 // db - указатель на БД
 func readUserTokenByNameDB(name string, db *sql.DB) (token string, err error) {
 

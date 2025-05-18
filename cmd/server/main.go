@@ -2917,7 +2917,10 @@ func httpServer() {
 		defer httpMutex.Unlock()
 
 		collectServInfo()
-		srvInfo.HandlStatusSrv(w, r)
+
+		srvInfo.DB = db.Ptr
+		srvInfo.Lgr = lgr
+		srvInfo.HandlHttpStatusSrv(w, r)
 	})
 
 	r.Get("/datadb", func(w http.ResponseWriter, r *http.Request) {
@@ -2937,6 +2940,9 @@ func httpServer() {
 			return
 		}
 
+		d.DB = db.Ptr
+		d.Lgr = lgr
+
 		// Чтение данных из БД
 		err := readDataDB(&d)
 		if err != nil {
@@ -2944,11 +2950,8 @@ func httpServer() {
 			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 			return
 		}
-
 		// Передача данных клиенту
-		d.DB = db.Ptr
-		d.Lgr = lgr
-		d.HandlExpDataDB(w, r)
+		d.HandlHttpExpDataDB(w, r)
 	})
 
 	// Запуск HTTP сервера
@@ -2976,7 +2979,7 @@ func goHttpsServer() {
 
 		srvInfo.DB = db.Ptr
 		srvInfo.Lgr = lgr
-		srvInfo.HandlStatusSrv(w, r)
+		srvInfo.HandlHttpsStatusSrv(w, r)
 	})
 
 	r.Get("/datadb", func(w http.ResponseWriter, r *http.Request) {
@@ -2996,6 +2999,9 @@ func goHttpsServer() {
 			return
 		}
 
+		d.DB = db.Ptr
+		d.Lgr = lgr
+
 		// Чтение данных из БД
 		err := readDataDB(&d)
 		if err != nil {
@@ -3007,7 +3013,7 @@ func goHttpsServer() {
 		// Обработчик запроса
 		d.DB = db.Ptr
 		d.Lgr = lgr
-		d.HandlExpDataDB(w, r)
+		d.HandlHttpsExpDataDB(w, r)
 	})
 
 	r.Post("/registration", func(w http.ResponseWriter, r *http.Request) {
@@ -3015,7 +3021,7 @@ func goHttpsServer() {
 		user.DB = db.Ptr
 		user.Lgr = lgr
 
-		user.HandleHttpsRegistration(w, r)
+		user.HandlHttpsRegistration(w, r)
 	})
 
 	// Запуск HTTPS сервера
@@ -3075,17 +3081,23 @@ func collectServInfo() {
 // Параметры:
 //
 // data - стартовая дата выборки и результат выборки.
-func readDataDB(data *serverAPI.DataDBCall) (err error) {
+func readDataDB(data *serverAPI.DataDBCall) error {
 
 	// Проверка входных данных
 	if data == nil {
 		return errors.New("основная функция запросов -> принят пустой указатель")
 	}
 
-	limit := 10
+	limit := 100
 	offset := 100
 	sizeRx := limit
 	cnt := 0
+
+	// Запрос на количества строк по указанной дате
+	err := readCntStrDataDB(data)
+	if err != nil {
+		return err
+	}
 
 	// Реализация запроса данных
 	for sizeRx == limit {
@@ -3134,7 +3146,7 @@ func readDataDBReq(data *serverAPI.DataDBCall, limit, offset int) (size int, err
 	 SELECT name, value, qual, timestamp
      FROM %s.%s
      WHERE date(timestamp) = '%v'
-	 ORDER By timestamp DESC
+	 ORDER By timestamp ASC
 	 LIMIT %d OFFSET %d
 	 ;              
 	`, os.Getenv("TABLE_SCHEMA"), os.Getenv("TABLE_DATA"), reqDate, limit, offset)
@@ -3169,4 +3181,26 @@ func readDataDBReq(data *serverAPI.DataDBCall, limit, offset int) (size int, err
 	data.Data = append(data.Data, localData...)
 
 	return cnt, nil
+}
+
+// Функция выполняет запрос с подсчётом количества строк по указанной дате. Возвращает ошибку.
+func readCntStrDataDB(data *serverAPI.DataDBCall) error {
+
+	// Проверка входных данных
+	if data == nil {
+		return errors.New("принят пустой указатель")
+	}
+
+	q := fmt.Sprintf(`
+	SELECT COUNT(*)
+	FROM %s.%s 
+	WHERE date(timestamp) = $1
+	;`, os.Getenv("TABLE_SCHEMA"), os.Getenv("TABLE_DATA"))
+
+	err := data.DB.QueryRow(q, data.StartDate).Scan(&data.CntStrDB)
+	if err != nil {
+		return fmt.Errorf("ошибка при запросе количества строк по дате {%d}: {%v}", data.CntStrDB, err)
+	}
+
+	return nil
 }

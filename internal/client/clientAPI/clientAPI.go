@@ -2,6 +2,7 @@ package clientapi
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -40,6 +41,7 @@ type (
 	// JSON для приёма архивных данных БД
 	RxDataDB struct {
 		StartDate string   `json:"startdate"`
+		CntStr    string   `json:"cntstr"`
 		Data      []DataEl `json:"datadb"`
 	}
 	DataEl struct {
@@ -106,6 +108,17 @@ func (rx *RxDataDB) ReqDataDB() error {
 		return fmt.Errorf("ошибка выполнения запроса к серверу: {%v}", err)
 	}
 
+	// Проверка успешности запроса
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("принят код статуса отличный от ОК: {%v}", resp.StatusCode)
+	}
+
+	rx.CntStr = resp.Header.Get("Count-Strings")
+	if rx.CntStr == "" {
+		return errors.New("нет принятых данных в заголовке Count-Strings")
+	}
+
+	// Чтение тела
 	dataResp, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return fmt.Errorf("ошибка чтения тела ответа: {%v}", err)
