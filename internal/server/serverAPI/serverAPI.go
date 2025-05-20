@@ -17,6 +17,11 @@ import (
 )
 
 type (
+	// Для передачи количества строк
+	CntStrT struct {
+		CntStr string `json:"cntstr"`
+	}
+
 	// Для передачи состояния сервера
 	StatusServerCallT struct {
 		TimeStart string
@@ -111,7 +116,7 @@ func (el *StatusServerCallT) HandlHttpsStatusSrv(w http.ResponseWriter, r *http.
 	}
 
 	// Проверка, что принятое имя и его токен соответствуют
-	tokenDB, err := readUserTokenByNameDB(name, el.DB)
+	tokenDB, err := ReadUserTokenByNameDB(name, el.DB)
 	if err != nil {
 		el.Lgr.W.Printf("https-status -> ошибка при получении токена, по имени пользователя {%v}", err)
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
@@ -192,7 +197,7 @@ func (el *DataDBCall) HandlHttpsExpDataDB(w http.ResponseWriter, r *http.Request
 	}
 
 	// Проверка, что принятое имя и его токен соответствуют
-	tokenDB, err := readUserTokenByNameDB(name, el.DB)
+	tokenDB, err := ReadUserTokenByNameDB(name, el.DB)
 	if err != nil {
 		el.Lgr.W.Printf("https-dataDB -> ошибка при получении токена, по имени пользователя {%v}", err)
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
@@ -396,7 +401,7 @@ func readUserNameByTokenDB(token string, db *sql.DB) (name string, err error) {
 //
 // name - имя пользователя
 // db - указатель на БД
-func readUserTokenByNameDB(name string, db *sql.DB) (token string, err error) {
+func ReadUserTokenByNameDB(name string, db *sql.DB) (token string, err error) {
 
 	q := fmt.Sprintf("SELECT token FROM %s.%s WHERE name = $1",
 		os.Getenv("TABLE_SCHEMA"),

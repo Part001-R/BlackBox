@@ -3210,6 +3210,194 @@ func goHttpsServer() {
 		user.HandlHttpsRegistration(w, r)
 	})
 
+	r.Get("/cntstr", func(w http.ResponseWriter, r *http.Request) {
+
+		w.Header().Set("Content-Type", "application-json")
+
+		// Чтение заголовка
+		token := r.Header.Get("authorization")
+		if token == "" {
+			lgr.W.Println("https-cntstr -> нет токена")
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+
+		// Чтение параметров
+		qP := r.URL.Query()
+
+		date := qP.Get("date")
+		if date == "" {
+			lgr.W.Println("https-cntstr -> в параметре date нет данных")
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+		_, err := time.Parse("2006-01-02", date)
+		if err != nil {
+			lgr.W.Printf("https-cntstr -> в параметре date не дата {%s}", date)
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+
+		name := qP.Get("name")
+		if name == "" {
+			lgr.W.Println("https-cntstr -> нет данных по параметру name")
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+
+		// Проверка, что принятое имя и его токен соответствуют
+		tokenDB, err := serverAPI.ReadUserTokenByNameDB(name, db.Ptr)
+		if err != nil {
+			lgr.W.Printf("https-cntstr -> ошибка при получении токена, по имени пользователя {%v}", err)
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+
+		if token != tokenDB {
+			lgr.W.Println("https-cntstr -> принятый токен и токен из БД не соответствуют")
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+
+		// Получение количества строк по указанной дате
+		d := serverAPI.DataDBCall{
+			StartDate: date,
+		}
+		d.DB = db.Ptr
+		d.Lgr = lgr
+
+		err = readCntStrDataDB(&d)
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+
+		cntStr := strconv.Itoa(d.CntStrDB)
+
+		cntInfo := serverAPI.CntStrT{
+			CntStr: cntStr,
+		}
+		bTx, err := json.Marshal(cntInfo)
+		if err != nil {
+			lgr.W.Println("https-cntstr -> ошибка сериализации данных счётчика строк")
+		}
+
+		lgr.I.Printf("https-cntstr -> выполнен запрос количество строк в БД на {%s}", date)
+		w.WriteHeader(http.StatusOK)
+		w.Write(bTx)
+	})
+
+	r.Get("/partdatadb", func(w http.ResponseWriter, r *http.Request) {
+
+		w.Header().Set("Content-Type", "application-json")
+
+		// Чтение заголовков
+		token := r.Header.Get("authorization")
+		if token == "" {
+			lgr.W.Println("hdlr-partdatadb -> нет токена")
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+
+		// Чтение параметров запроса. Проверка.
+		qP := r.URL.Query()
+
+		name := qP.Get("name")
+		if name == "" {
+			lgr.W.Println("hdlr-partdatadb -> нет данных по параметру name")
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+
+		RxNumbReg := qP.Get("numbReg")
+		if RxNumbReg == "" {
+			lgr.W.Println("hdlr-partdatadb -> принят запрос с пустым содержимым numbReg")
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+		numbReq, err := strconv.Atoi(RxNumbReg)
+		if err != nil {
+			lgr.W.Printf("hdlr-partdatadb -> принят запрос где в numbReg не число {%s}", RxNumbReg)
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+
+		rxStrLimit := qP.Get("strLimit")
+		if rxStrLimit == "" {
+			lgr.W.Println("hdlr-partdatadb -> принят запрос с пустым содержимым strLimit")
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+		limit, err := strconv.Atoi(rxStrLimit)
+		if err != nil {
+			lgr.W.Printf("hdlr-partdatadb -> принят запрос где в strLimit не число {%s}", rxStrLimit)
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+
+		rxStrOffSet := qP.Get("strOffSet")
+		if rxStrOffSet == "" {
+			lgr.W.Println("hdlr-partdatadb -> принят запрос с пустым содержимым strOffSet")
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+		OffSet, err := strconv.Atoi(rxStrOffSet)
+		if err != nil {
+			lgr.W.Printf("hdlr-partdatadb -> принят запрос где в strOffSet не число {%s}", rxStrOffSet)
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+
+		dateDB := qP.Get("date")
+		if dateDB == "" {
+			lgr.W.Println("hdlr-partdatadb -> принят запрос с пустым содержимым dateDB")
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+		_, err = time.Parse("2006-01-02", dateDB)
+		if err != nil {
+			lgr.W.Printf("hdlr-partdatadb -> принят запрос где в dateDB не дата {%s}", dateDB)
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+
+		// Проверка, что принятое имя и его токен соответствуют
+		tokenDB, err := serverAPI.ReadUserTokenByNameDB(name, db.Ptr)
+		if err != nil {
+			lgr.W.Printf("hdlr-partdatadb -> ошибка при получении токена, по имени пользователя {%v}", err)
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+
+		if token != tokenDB {
+			lgr.W.Println("hdlr-partdatadb -> принятый токен и токен из БД не соответствуют")
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+
+		// Чтение данных БД
+		rdDataDB, err := readPartDataDBReq(dateDB, limit, OffSet)
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+
+		// Ответ
+		dataForTx := serverAPI.PartDataDB{
+			NumbReq: numbReq,
+			Data:    rdDataDB,
+		}
+
+		txByte, err := json.Marshal(dataForTx)
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		w.Write(txByte)
+
+	})
+
 	// Запуск HTTPS сервера
 	err := http.ListenAndServeTLS(
 		os.Getenv("HTTPS_SERVER_IP")+":"+os.Getenv("HTTPS_SERVER_PORT"),
