@@ -61,6 +61,7 @@ type (
 		Data      []DataEl
 		DB        *sql.DB
 		Lgr       loger.Log_Object
+		FileName  string
 	}
 
 	DataDB struct {
@@ -78,6 +79,12 @@ type (
 	LoginUser struct {
 		DB  *sql.DB
 		Lgr loger.Log_Object
+	}
+
+	// Для передачи данных при частичной выгрузке
+	PartDataDB struct {
+		NumbReq int      `json:"numbreq"`
+		Data    []DataEl `json:"data"`
 	}
 )
 
@@ -241,6 +248,46 @@ func (el *DataDBCall) HandlHttpExpDataDB(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusOK)
 	w.Write(resp)
 
+}
+
+// Обработчик запроса на передачу xlsx фала архивных данных БД
+func (el *DataDBCall) HandlHttpXlsxDataDB(w http.ResponseWriter, r *http.Request) {
+
+	excelFilePath := "./" + el.FileName
+
+	file, err := os.Open(excelFilePath)
+	if err != nil {
+		el.Lgr.E.Printf("Hndl-xlsx -> ошибка {%v} при открытии файла {./%s}", err, el.FileName)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	defer func() {
+		err := file.Close()
+		if err != nil {
+			el.Lgr.E.Printf("Hndl-xlsx -> ошибка {%v} закрытия файла {./%s} по завершению работы обработчика", err, el.FileName)
+		}
+	}()
+
+	cntStr := strconv.Itoa(el.CntStrDB)
+	w.Header().Set("Count-Strings", cntStr)
+
+	fileInfo, err := file.Stat()
+	if err != nil {
+		el.Lgr.E.Printf("Hndl-xlsx -> ошибка {%v} при получении информации о файле {%s}", err, el.FileName)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", fileInfo.Size()))
+
+	w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	w.Header().Set("Content-Disposition", "attachment; filename="+el.FileName)
+
+	_, err = io.Copy(w, file)
+	if err != nil {
+		el.Lgr.E.Printf("Hndl-xlsx -> ошибка {%v} при передаче файла {./%s}", err, el.FileName)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
 }
 
 // Обработчик регистрации пользователя на https сервере

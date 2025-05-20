@@ -454,7 +454,7 @@ func readDevSheet(e *ConfXLSX_Import) error {
 	return nil
 }
 
-// Создание xlsx файла. Возвращается имя файла и ошибка.
+// Создание xlsx файла, конфигурации. Возвращается имя файла и ошибка.
 //
 // Параметры:
 //
@@ -462,7 +462,7 @@ func readDevSheet(e *ConfXLSX_Import) error {
 // name - имя файла
 // time - время создания файла
 // typ - тип файла
-func (e *ConfXLSX_Export) CreateXlsx(path, name, time, typ string) (nameFile string, err error) {
+func (e *ConfXLSX_Export) CreateXlsxConfig(path, name, time, typ string) (nameFile string, err error) {
 
 	file := excelize.NewFile()
 
@@ -489,6 +489,33 @@ func (e *ConfXLSX_Export) CreateXlsx(path, name, time, typ string) (nameFile str
 	}
 
 	return f, nil
+}
+
+// Создание xlsx файла, экспорта данных. Возвращается имя файла и ошибка.
+//
+// Параметры:
+//
+// name - имя файла
+func CreateXlsxDataDB(name string) (nameFile string, err error) {
+
+	file := excelize.NewFile()
+
+	_, err = file.NewSheet("DataDB") // добавление вкладки
+	if err != nil {
+		return "", err
+	}
+
+	err = file.DeleteSheet("Sheet1") // удаление созданной по умолчанию вкладки
+	if err != nil {
+		return "", err
+	}
+
+	err = file.SaveAs(name)
+	if err != nil {
+		return "", err
+	}
+
+	return name, nil
 }
 
 // Проверка корректности данных импорта. Возвращается ошибка

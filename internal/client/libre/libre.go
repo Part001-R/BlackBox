@@ -1,6 +1,9 @@
 package libre
 
 import (
+	"errors"
+	"fmt"
+
 	"github.com/xuri/excelize/v2"
 )
 
@@ -18,14 +21,19 @@ func CreateXlsx(path, name, time, typ string) (nameFile string, err error) {
 
 	_, err = file.NewSheet("DataDB") // добавление вкладки
 	if err != nil {
-		return "", err
+		return "", errors.New("ошибка при добавлении вкладки DataDB")
 	}
 
-	f := path + name + "-" + time + typ
+	err = file.DeleteSheet("Sheet1")
+	if err != nil {
+		return "", errors.New("ошибка при удалении вкладки Sheet1")
+	}
+
+	f := path + name + time + typ
 
 	err = file.SaveAs(f)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("ошибка сохранения файла {%s}", f)
 	}
 
 	return f, nil

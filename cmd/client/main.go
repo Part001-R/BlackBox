@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strconv"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -61,14 +62,13 @@ func menu() {
 		fmt.Print("Введите дату экспорта (YYYY-MM-DD): ")
 		fmt.Scanln(&str)
 
-		err := expDataDB(str)
+		err := partDataDB(str) // Запрос данных с дроблением. Запрос по 100 строк, до завершения.
 		if err != nil {
-			fmt.Println("ошибка при экспорте данных из БД", err)
+			fmt.Printf("Ошибка запроса архивных данных: {%v}\n", err)
 			fmt.Println("Работа прервана")
 			return
 		}
-
-		fmt.Println("Экспорт данных выполнен")
+		fmt.Println("Данные приняты")
 
 	case "3":
 		return
@@ -150,13 +150,36 @@ func expDataDB(startDate string) error {
 	return nil
 }
 
-// Функция зодаёт xlsx файл и сохраняет туда принятые данные от сервера. Возвращает ошибку.
+// Запрос xlsx файла с архивными данными БД. Функция возвращает ошибку
+func getXlsxDataDB(startDate string) error {
+
+	// Проверка корректности ввода даты
+	t, err := time.Parse("2006-01-02", startDate)
+	if err != nil {
+		return fmt.Errorf("ошибка ввода даты: {%s}", t)
+	}
+
+	var dataDB clientapi.RxDataDB
+
+	dataDB.StartDate = startDate
+
+	// Запрос архивных данных БД
+	err = dataDB.ReqXlsxDataDB()
+	if err != nil {
+		return fmt.Errorf("ошибка запроса xlsx файла: {%v}", err)
+	}
+
+	fmt.Printf("По дате {%s}, в БД {%s} строк\n", dataDB.StartDate, dataDB.CntStr)
+	return nil
+}
+
+// Функция создаёт xlsx файл и сохраняет туда принятые данные от сервера. Возвращает ошибку.
 func saveDataXlsx(data clientapi.RxDataDB) (err error) {
 
 	tn := time.Now().Format("02.01.2006-15:04:05")
 
 	// Создание файла
-	fileName, err := libre.CreateXlsx("./", "exportData", tn, ".xlsx")
+	fileName, err := libre.CreateXlsx("./", "exportData_"+data.StartDate+"___", tn, ".xlsx")
 	if err != nil {
 		return fmt.Errorf("ошибка при создании xlsx файла экспорта: {%v}", err)
 	}
@@ -220,6 +243,159 @@ func saveDataXlsx(data clientapi.RxDataDB) (err error) {
 	err = file.Save()
 	if err != nil {
 		return errors.New("ошибка при сохранении Xlsx файла")
+	}
+
+	return nil
+}
+
+// Функция создаёт xlsx файл и сохраняет туда принятые данные от сервера. Возвращает ошибку.
+func savePartDataXlsx(rxData []clientapi.DataEl, startDate string) (err error) {
+
+	tn := time.Now().Format("02.01.2006-15:04:05")
+
+	// Создание файла
+	fileName, err := libre.CreateXlsx("./", "exportData_"+startDate+"___", tn, ".xlsx")
+	if err != nil {
+		return fmt.Errorf("ошибка при создании xlsx файла экспорта: {%v}", err)
+	}
+
+	// Открытие файла
+	file, err := excelize.OpenFile(fileName)
+	if err != nil {
+		return fmt.Errorf("ошибка при открытии файла: {%v}", fileName)
+	}
+
+	// Заполнение файла
+
+	nameSheet := "DataDB"
+
+	// Формирование заголовков
+	// Name:	Value:	Quality:	TimeStamp:
+	err = file.SetCellValue(nameSheet, "A1", "Name:")
+	if err != nil {
+		return errors.New("ошибка при добавлении заголовка столбца Name")
+	}
+	err = file.SetCellValue(nameSheet, "B1", "Value:")
+	if err != nil {
+		return errors.New("ошибка при добавлении заголовка столбца Value")
+	}
+	err = file.SetCellValue(nameSheet, "C1", "Quality:")
+	if err != nil {
+		return errors.New("ошибка при добавлении заголовка столбца Quality")
+	}
+	err = file.SetCellValue(nameSheet, "D1", "TimeStamp:")
+	if err != nil {
+		return errors.New("ошибка при добавлении заголовка столбца TimeStamp")
+	}
+
+	// Перенос данных
+	for i, str := range rxData {
+
+		i += 2
+
+		err = file.SetCellValue(nameSheet, fmt.Sprintf("A%d", i), str.Name)
+		if err != nil {
+			return fmt.Errorf("ошибка {%v} добавления значения {%s} в ячейку {A%d}", err, str.Name, i)
+		}
+
+		err = file.SetCellValue(nameSheet, fmt.Sprintf("B%d", i), str.Value)
+		if err != nil {
+			return fmt.Errorf("ошибка {%v} добавления значения {%s} в ячейку {B%d}", err, str.Value, i)
+		}
+
+		err = file.SetCellValue(nameSheet, fmt.Sprintf("C%d", i), str.Qual)
+		if err != nil {
+			return fmt.Errorf("ошибка {%v} добавления значения {%s} в ячейку {C%d}", err, str.Qual, i)
+		}
+
+		err = file.SetCellValue(nameSheet, fmt.Sprintf("D%d", i), str.TimeStamp)
+		if err != nil {
+			return fmt.Errorf("ошибка {%v} добавления значения {%s} в ячейку {D%d}", err, str.TimeStamp, i)
+		}
+	}
+
+	// Сохрангение
+	err = file.Save()
+	if err != nil {
+		return errors.New("ошибка при сохранении Xlsx файла")
+	}
+
+	return nil
+}
+
+// Функция реализует очередь запросов на сервер для выгрузки исходных данных. Возвращает ошибку.
+//
+// Параметры:
+//
+// startDate - дата экспорта данных
+func partDataDB(startDate string) error {
+
+	// Проверка корректности ввода даты
+	t, err := time.Parse("2006-01-02", startDate)
+	if err != nil {
+		return fmt.Errorf("ошибка ввода даты: {%s}", t)
+	}
+
+	var dataDB clientapi.RxDataDB
+
+	dataDB.StartDate = startDate
+
+	// Запрос количества строк в БД по указанной дате
+	err = dataDB.ReqCntStrByDateDB()
+	if err != nil {
+		return fmt.Errorf("ошибка запроса количества строк: {%v}", err)
+	}
+
+	fmt.Printf("в БД на {%s}, содержится {%s} записей\n", dataDB.StartDate, dataDB.CntStr)
+
+	// Вычисление количества необходимых запросов
+	cntStr, err := strconv.Atoi(dataDB.CntStr)
+	if err != nil {
+		return fmt.Errorf("ошибка преобразования значения количества строк из типа string {%s}, в int", dataDB.CntStr)
+	}
+	iter := cntStr / 100
+
+	collectRxDataDB := make([]clientapi.PartDataDB, 0)
+
+	// Запросы
+	if iter == 0 {
+
+		rxData, err := clientapi.ReqPartDataDB(0, 100, 0, startDate)
+		if err != nil {
+			return errors.New("ошибка при выполнении запроса при количестве строк < 100")
+		}
+		collectRxDataDB = append(collectRxDataDB, rxData)
+
+	} else {
+
+		for i := 0; i < iter; i++ {
+
+			// отображение процентов выполнения получения данных от сервера
+			percentage := float64(i+1) / float64(iter) * 100
+			fmt.Printf("Получено данных: %.2f%%\r", percentage)
+
+			rxData, err := clientapi.ReqPartDataDB(i, 100, 100*i, startDate)
+			if err != nil {
+				return fmt.Errorf("ошибка при выполнении запроса на итерации {%d}, {%v}", i, err)
+			}
+			collectRxDataDB = append(collectRxDataDB, rxData)
+
+			time.Sleep(10 * time.Millisecond) // установка небольшой паузы между очередным запросом
+		}
+	}
+	fmt.Println()
+
+	// Подготовка данных для сохранения в xlsx
+	forXlsx := make([]clientapi.DataEl, 0)
+
+	for _, v := range collectRxDataDB {
+		forXlsx = append(forXlsx, v.Data...)
+	}
+
+	// Сохранение принятых данных в xlsx
+	err = savePartDataXlsx(forXlsx, startDate)
+	if err != nil {
+		return fmt.Errorf("ошибка при сохранении принятых данных в xlsx: {%v}", err)
 	}
 
 	return nil
