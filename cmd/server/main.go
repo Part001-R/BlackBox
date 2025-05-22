@@ -1896,6 +1896,10 @@ func goDriverModbusTCP(ctx context.Context, lgr loger.Log_Object, con modbustcpm
 
 				// запрос
 				rxUint16, rxByte, err := selectFuncMbTCPDo(con, v.FuncType, slaveID, address, quantity)
+				// повтор запроса из-за ошибки
+				if err != nil {
+					rxUint16, rxByte, err = selectFuncMbTCPDo(con, v.FuncType, slaveID, address, quantity)
+				}
 
 				// Обработка результата запроса
 				switch v.FuncType {
@@ -2007,10 +2011,16 @@ func goDriverModbusRTU(ctx context.Context, lgr loger.Log_Object, con modbusrtum
 				// запрос
 				rxByte, err := selectFuncMbRTUDo(con, v.FuncType, slaveID, address, quantity)
 				if err != nil {
-					lgr.W.Printf("ошибка {%v} при запросе Modbus-RTU: слейв {%d}, функция {%s}, адрес регистра {%d}, количество регистров {%d} ", err, slaveID, v.FuncType, address, quantity)
-					rx.Value = 0
-					rx.Qual = 0
-				} else {
+					// повтор запроса из-за ошибки
+					rxByte, err = selectFuncMbRTUDo(con, v.FuncType, slaveID, address, quantity)
+					if err != nil {
+						lgr.W.Printf("ошибка {%v} повторного запроса Modbus-RTU: слейв {%d}, функция {%s}, адрес регистра {%d}, количество регистров {%d} ", err, slaveID, v.FuncType, address, quantity)
+						rx.Value = 0
+						rx.Qual = 0
+					}
+				}
+
+				if err == nil {
 					val, err := buildValFromByte(rxByte, v.DataType, v.Format)
 					if err != nil {
 						lgr.E.Println("ошибка в обработке принятых данных Modbus-RTU: ", err)
@@ -3197,7 +3207,9 @@ func goHttpsServer() {
 		}
 		defer func() {
 			err = r.Body.Close()
-			lgr.W.Println("https-cntstr -> ошибка закрытия потока чтения тела ответа при завершении работы обработчика")
+			if err != nil {
+				lgr.W.Println("https-cntstr -> ошибка закрытия потока чтения тела ответа при завершении работы обработчика")
+			}
 		}()
 
 		err = json.Unmarshal(bytesBody, &reqBoddy)
@@ -3285,7 +3297,9 @@ func goHttpsServer() {
 		}
 		defer func() {
 			err = r.Body.Close()
-			lgr.W.Println("https-partdatadb -> ошибка закрытия потока чтения тела ответа при завершении работы обработчика")
+			if err != nil {
+				lgr.W.Println("https-partdatadb -> ошибка закрытия потока чтения тела ответа при завершении работы обработчика")
+			}
 		}()
 
 		err = json.Unmarshal(bytesBody, &reqBody)
