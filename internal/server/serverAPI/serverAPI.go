@@ -22,6 +22,17 @@ type (
 		CntStr string `json:"cntstr"`
 	}
 
+	// Для даты и имени
+	DateNameT struct {
+		Date string `json:"date"`
+		Name string `json:"name"`
+	}
+
+	// Для имени
+	NameT struct {
+		Name string `json:"name"`
+	}
+
 	// Для передачи состояния сервера
 	StatusServerCallT struct {
 		TimeStart string
@@ -106,17 +117,31 @@ func (el *StatusServerCallT) HandlHttpsStatusSrv(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// Чтение параметров запроса
-	queryParams := r.URL.Query()
-	name := queryParams.Get("name")
-	if name == "" {
-		el.Lgr.W.Println("https-status -> нет имени пользователя, в запросе")
+	// Чтение тела запроса
+	var rxBody NameT
+
+	bytesBody, err := io.ReadAll(r.Body)
+	if err != nil {
+		el.Lgr.W.Println("https-status -> ошибка чтения тела запроса")
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+	defer func() {
+		err = r.Body.Close()
+		if err != nil {
+			el.Lgr.E.Println("https-status -> ошибка закрытия потока чтения тела запроса при завершении работы обработчика запроса")
+		}
+	}()
+
+	err = json.Unmarshal(bytesBody, &rxBody)
+	if err != nil {
+		el.Lgr.W.Println("https-status -> ошибка десериализации данных тела запроса")
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
 	// Проверка, что принятое имя и его токен соответствуют
-	tokenDB, err := ReadUserTokenByNameDB(name, el.DB)
+	tokenDB, err := ReadUserTokenByNameDB(rxBody.Name, el.DB)
 	if err != nil {
 		el.Lgr.W.Printf("https-status -> ошибка при получении токена, по имени пользователя {%v}", err)
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
@@ -144,7 +169,7 @@ func (el *StatusServerCallT) HandlHttpsStatusSrv(w http.ResponseWriter, r *http.
 	}
 
 	// Передача данных
-	el.Lgr.I.Printf("https-status -> пользователь {%s} запросил состояние сервера", name)
+	el.Lgr.I.Printf("https-status -> пользователь {%s} запросил состояние сервера", rxBody.Name)
 	w.WriteHeader(http.StatusOK)
 	w.Write(resp)
 }

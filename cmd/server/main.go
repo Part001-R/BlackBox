@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"math"
 	"net/http"
@@ -3156,50 +3157,13 @@ func goHttpsServer() {
 	// Ручки HTTP сервера
 	r := chi.NewRouter()
 
-	r.Get("/status", func(w http.ResponseWriter, r *http.Request) {
-
-		httpMutex.Lock()
-		defer httpMutex.Unlock()
+	r.Post("/status", func(w http.ResponseWriter, r *http.Request) {
 
 		collectServInfo()
 
 		srvInfo.DB = db.Ptr
 		srvInfo.Lgr = lgr
 		srvInfo.HandlHttpsStatusSrv(w, r)
-	})
-
-	r.Get("/datadb", func(w http.ResponseWriter, r *http.Request) {
-
-		httpMutex.Lock()
-		defer httpMutex.Unlock()
-
-		d := serverAPI.DataDBCall{
-			StartDate: "",
-			Data:      make([]serverAPI.DataEl, 0),
-		}
-
-		qParams := r.URL.Query()
-		d.StartDate = qParams.Get("startdate")
-		if d.StartDate == "" {
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadGateway)
-			return
-		}
-
-		d.DB = db.Ptr
-		d.Lgr = lgr
-
-		// Чтение данных из БД
-		err := readDataDB(&d)
-		if err != nil {
-			lgr.E.Printf("ошибка при чтении данных из БД: {%v}", err)
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return
-		}
-
-		// Обработчик запроса
-		d.DB = db.Ptr
-		d.Lgr = lgr
-		d.HandlHttpsExpDataDB(w, r)
 	})
 
 	r.Post("/registration", func(w http.ResponseWriter, r *http.Request) {
@@ -3210,7 +3174,7 @@ func goHttpsServer() {
 		user.HandlHttpsRegistration(w, r)
 	})
 
-	r.Get("/cntstr", func(w http.ResponseWriter, r *http.Request) {
+	r.Post("/cntstr", func(w http.ResponseWriter, r *http.Request) {
 
 		w.Header().Set("Content-Type", "application-json")
 
@@ -3222,31 +3186,40 @@ func goHttpsServer() {
 			return
 		}
 
-		// Чтение параметров
-		qP := r.URL.Query()
+		// Тело запроса
+		var reqBoddy serverAPI.DateNameT
 
-		date := qP.Get("date")
-		if date == "" {
-			lgr.W.Println("https-cntstr -> в параметре date нет данных")
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-		_, err := time.Parse("2006-01-02", date)
+		bytesBody, err := io.ReadAll(r.Body)
 		if err != nil {
-			lgr.W.Printf("https-cntstr -> в параметре date не дата {%s}", date)
+			lgr.W.Println("https-cntstr -> ошибка чтения тела запроса")
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+		defer func() {
+			err = r.Body.Close()
+			lgr.W.Println("https-cntstr -> ошибка закрытия потока чтения тела ответа при завершении работы обработчика")
+		}()
+
+		err = json.Unmarshal(bytesBody, &reqBoddy)
+		if err != nil {
+
+		}
+
+		// Проверка данных тела запроса
+		_, err = time.Parse("2006-01-02", reqBoddy.Date)
+		if err != nil {
+			lgr.W.Printf("https-cntstr -> в date не дате {%s}", reqBoddy.Date)
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 			return
 		}
-
-		name := qP.Get("name")
-		if name == "" {
-			lgr.W.Println("https-cntstr -> нет данных по параметру name")
+		if reqBoddy.Name == "" {
+			lgr.W.Println("https-cntstr -> нет данных в name")
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 			return
 		}
 
 		// Проверка, что принятое имя и его токен соответствуют
-		tokenDB, err := serverAPI.ReadUserTokenByNameDB(name, db.Ptr)
+		tokenDB, err := serverAPI.ReadUserTokenByNameDB(reqBoddy.Name, db.Ptr)
 		if err != nil {
 			lgr.W.Printf("https-cntstr -> ошибка при получении токена, по имени пользователя {%v}", err)
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
@@ -3261,7 +3234,7 @@ func goHttpsServer() {
 
 		// Получение количества строк по указанной дате
 		d := serverAPI.DataDBCall{
-			StartDate: date,
+			StartDate: reqBoddy.Date,
 		}
 		d.DB = db.Ptr
 		d.Lgr = lgr
@@ -3280,14 +3253,16 @@ func goHttpsServer() {
 		bTx, err := json.Marshal(cntInfo)
 		if err != nil {
 			lgr.W.Println("https-cntstr -> ошибка сериализации данных счётчика строк")
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
 		}
 
-		lgr.I.Printf("https-cntstr -> выполнен запрос количество строк в БД на {%s}", date)
+		lgr.I.Printf("https-cntstr -> выполнен запрос количество строк в БД на {%s}", reqBoddy.Date)
 		w.WriteHeader(http.StatusOK)
 		w.Write(bTx)
 	})
 
-	r.Get("/partdatadb", func(w http.ResponseWriter, r *http.Request) {
+	r.Post("/partdatadb", func(w http.ResponseWriter, r *http.Request) {
 
 		w.Header().Set("Content-Type", "application-json")
 
@@ -3299,15 +3274,42 @@ func goHttpsServer() {
 			return
 		}
 
-		// Чтение параметров запроса. Проверка.
-		qP := r.URL.Query()
+		// Тело запроса
+		var reqBody serverAPI.DateNameT
 
-		name := qP.Get("name")
-		if name == "" {
-			lgr.W.Println("hdlr-partdatadb -> нет данных по параметру name")
+		bytesBody, err := io.ReadAll(r.Body)
+		if err != nil {
+			lgr.W.Println("https-partdatadb -> ошибка чтения тела запроса")
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+		defer func() {
+			err = r.Body.Close()
+			lgr.W.Println("https-partdatadb -> ошибка закрытия потока чтения тела ответа при завершении работы обработчика")
+		}()
+
+		err = json.Unmarshal(bytesBody, &reqBody)
+		if err != nil {
+			lgr.W.Println("https-partdatadb -> ошибка десериализации тела запроса")
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+
+		// Проверка данных тела запроса
+		_, err = time.Parse("2006-01-02", reqBody.Date)
+		if err != nil {
+			lgr.W.Printf("https-partdatadb -> в date не дате {%s}", reqBody.Date)
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 			return
 		}
+		if reqBody.Name == "" {
+			lgr.W.Println("https-partdatadb -> нет данных в name")
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+			return
+		}
+
+		// Чтение параметров запроса. Проверка.
+		qP := r.URL.Query()
 
 		RxNumbReg := qP.Get("numbReg")
 		if RxNumbReg == "" {
@@ -3348,21 +3350,8 @@ func goHttpsServer() {
 			return
 		}
 
-		dateDB := qP.Get("date")
-		if dateDB == "" {
-			lgr.W.Println("hdlr-partdatadb -> принят запрос с пустым содержимым dateDB")
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-		_, err = time.Parse("2006-01-02", dateDB)
-		if err != nil {
-			lgr.W.Printf("hdlr-partdatadb -> принят запрос где в dateDB не дата {%s}", dateDB)
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-
 		// Проверка, что принятое имя и его токен соответствуют
-		tokenDB, err := serverAPI.ReadUserTokenByNameDB(name, db.Ptr)
+		tokenDB, err := serverAPI.ReadUserTokenByNameDB(reqBody.Name, db.Ptr)
 		if err != nil {
 			lgr.W.Printf("hdlr-partdatadb -> ошибка при получении токена, по имени пользователя {%v}", err)
 			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
@@ -3376,7 +3365,7 @@ func goHttpsServer() {
 		}
 
 		// Чтение данных БД
-		rdDataDB, err := readPartDataDBReq(dateDB, limit, OffSet)
+		rdDataDB, err := readPartDataDBReq(reqBody.Date, limit, OffSet)
 		if err != nil {
 			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 			return
