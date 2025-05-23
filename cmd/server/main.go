@@ -9,10 +9,8 @@ import (
 	serverAPI "blackbox/internal/server/serverAPI"
 	"blackbox/internal/server/users"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
 	"math"
 	"net/http"
@@ -88,7 +86,6 @@ var (
 	cmdArgs      map[string][]string
 	srvInfo      serverAPI.StatusServerCallT
 	hostConnects connects
-	httpMutex    sync.Mutex
 )
 
 const (
@@ -2926,229 +2923,27 @@ func httpServer() {
 
 	//
 	r.Get("/status", func(w http.ResponseWriter, r *http.Request) {
-		httpMutex.Lock()
-		defer httpMutex.Unlock()
-
+		// Предоставление сводной информации о сервере
 		collectServInfo()
-
 		srvInfo.DB = db.Ptr
 		srvInfo.Lgr = lgr
 		srvInfo.HandlHttpStatusSrv(w, r)
 	})
 
-	r.Get("/datadb", func(w http.ResponseWriter, r *http.Request) {
-
-		httpMutex.Lock()
-		defer httpMutex.Unlock()
-
-		d := serverAPI.DataDBCall{
-			StartDate: "",
-			Data:      make([]serverAPI.DataEl, 0),
-		}
-
-		qParams := r.URL.Query()
-		d.StartDate = qParams.Get("startdate")
-		if d.StartDate == "" {
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadGateway)
-			return
-		}
-
-		d.DB = db.Ptr
-		d.Lgr = lgr
-
-		// Чтение данных из БД
-		err := readDataDB(&d)
-		if err != nil {
-			lgr.E.Printf("ошибка при чтении данных из БД: {%v}", err)
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return
-		}
-		// Передача данных клиенту
-		d.HandlHttpExpDataDB(w, r)
-	})
-
-	r.Get("/xlsx", func(w http.ResponseWriter, r *http.Request) {
-
-		d := serverAPI.DataDBCall{
-			StartDate: "",
-			Data:      make([]serverAPI.DataEl, 0),
-		}
-
-		// Проверка данных запроса
-		qParams := r.URL.Query()
-		d.StartDate = qParams.Get("startdate")
-		if d.StartDate == "" {
-			lgr.E.Println("запрос xlsx файла -> в пакете нет даты для экспорта данных")
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadGateway)
-			return
-		}
-		_, err := time.Parse("2006-01-02", d.StartDate)
-		if err != nil {
-			lgr.E.Printf("запрос xlsx файла -> принятые данные даты экспорта {%s}, не являются датой", d.StartDate)
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadGateway)
-			return
-		}
-
-		lgr.I.Println("локальный http клиент запросил архивные данные на: ", d.StartDate)
-
-		// Чтение данных БД
-		d.DB = db.Ptr
-		d.Lgr = lgr
-
-		err = readDataDB(&d)
-		if err != nil {
-			lgr.E.Printf("запрос xlsx файла -> ошибка при чтении данных из БД: {%v}", err)
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return
-		}
-
-		// Создание xlsx файла
-		tn := time.Now().Format("2006-01-02 15:04:05")
-
-		fileName := "exportDataDB_" + d.StartDate + "________" + tn + ".xlsx"
-
-		file, err := libre.CreateXlsxDataDB(fileName)
-		if err != nil {
-			lgr.E.Printf("запрос xlsx файла -> ошибка создания файла для данных экспорта: {%v}", err)
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return
-		}
-		defer func() {
-			err = os.Remove(file)
-			if err != nil {
-				lgr.E.Printf("ошибка {%v} удаления файла {%s} после завершения работы обработчика запроса", err, fileName)
-			}
-		}()
-
-		d.FileName = fileName
-
-		// Заполнение xlsx файла
-		err = saveDataDBXlsx(fileName, d)
-		if err != nil {
-			lgr.E.Printf("запрос xlsx файла -> ошибка заполнения xlsx файла {%v}", err)
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return
-		}
-
-		// Обработчик http запроса
-		d.HandlHttpXlsxDataDB(w, r)
-
-	})
-
 	r.Get("/cntstr", func(w http.ResponseWriter, r *http.Request) {
-
-		// Чтение параметров запроса
-		qP := r.URL.Query()
-
-		dateExp := qP.Get("date")
-		if dateExp == "" {
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-
-		// Проверка корректности даты
-		_, err := time.Parse("2006-01-02", dateExp)
-		if err != nil {
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-
-		d := serverAPI.DataDBCall{
-			StartDate: dateExp,
-		}
-		d.DB = db.Ptr
-		d.Lgr = lgr
-
-		// Запрос на количества строк по указанной дате
-		err = readCntStrDataDB(&d)
-		if err != nil {
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return
-		}
-
-		lgr.I.Printf("клиент http -> выполнен запрос количество строк в БД на {%s}", dateExp)
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(fmt.Sprintf("%d", d.CntStrDB)))
+		// Предоставление количества строк по указанной дате
+		var cntStr serverAPI.CntStrByDateT
+		cntStr.DB = db.Ptr
+		cntStr.Lgr = lgr
+		cntStr.HandlHttpCntStrByDate(w, r)
 	})
 
 	r.Get("/partdatadb", func(w http.ResponseWriter, r *http.Request) {
-
-		// Чтение параметров запроса. Проверка.
-		qP := r.URL.Query()
-
-		RxNumbReg := qP.Get("numbReg")
-		if RxNumbReg == "" {
-			lgr.W.Println("hdlr-partdatadb -> принят запрос с пустым содержимым numbReg")
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-		numbReq, err := strconv.Atoi(RxNumbReg)
-		if err != nil {
-			lgr.W.Printf("hdlr-partdatadb -> принят запрос где в numbReg не число {%s}", RxNumbReg)
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-
-		rxStrLimit := qP.Get("strLimit")
-		if rxStrLimit == "" {
-			lgr.W.Println("hdlr-partdatadb -> принят запрос с пустым содержимым strLimit")
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-		limit, err := strconv.Atoi(rxStrLimit)
-		if err != nil {
-			lgr.W.Printf("hdlr-partdatadb -> принят запрос где в strLimit не число {%s}", rxStrLimit)
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-
-		rxStrOffSet := qP.Get("strOffSet")
-		if rxStrOffSet == "" {
-			lgr.W.Println("hdlr-partdatadb -> принят запрос с пустым содержимым strOffSet")
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-		OffSet, err := strconv.Atoi(rxStrOffSet)
-		if err != nil {
-			lgr.W.Printf("hdlr-partdatadb -> принят запрос где в strOffSet не число {%s}", rxStrOffSet)
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-
-		dateDB := qP.Get("dateDB")
-		if dateDB == "" {
-			lgr.W.Println("hdlr-partdatadb -> принят запрос с пустым содержимым dateDB")
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-		_, err = time.Parse("2006-01-02", dateDB)
-		if err != nil {
-			lgr.W.Printf("hdlr-partdatadb -> принят запрос где в dateDB не дата {%s}", dateDB)
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-
-		// Чтение данных БД
-		rdDataDB, err := readPartDataDBReq(dateDB, limit, OffSet)
-		if err != nil {
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return
-		}
-
-		// Ответ
-		dataForTx := serverAPI.PartDataDB{
-			NumbReq: numbReq,
-			Data:    rdDataDB,
-		}
-
-		txByte, err := json.Marshal(dataForTx)
-		if err != nil {
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		w.Write(txByte)
-
+		// запрос данных БД
+		var partData serverAPI.PartDataT
+		partData.DB = db.Ptr
+		partData.Lgr = lgr
+		partData.HandlHttpPartDataDB(w, r)
 	})
 
 	// Запуск HTTP сервера
@@ -3168,237 +2963,38 @@ func goHttpsServer() {
 	r := chi.NewRouter()
 
 	r.Post("/status", func(w http.ResponseWriter, r *http.Request) {
-
+		// предоставляет сводные данные состояние сервера
 		collectServInfo()
 
+		var srvInfo serverAPI.StatusServerCallT
 		srvInfo.DB = db.Ptr
 		srvInfo.Lgr = lgr
 		srvInfo.HandlHttpsStatusSrv(w, r)
 	})
 
 	r.Post("/registration", func(w http.ResponseWriter, r *http.Request) {
-		var user serverAPI.LoginUser
+		// ручка реализует регистрацию пользователя на сервере.
+		// формируется и передаётся токен.
+		var user serverAPI.LoginUserT
 		user.DB = db.Ptr
 		user.Lgr = lgr
-
 		user.HandlHttpsRegistration(w, r)
 	})
 
 	r.Post("/cntstr", func(w http.ResponseWriter, r *http.Request) {
-
-		w.Header().Set("Content-Type", "application-json")
-
-		// Чтение заголовка
-		token := r.Header.Get("authorization")
-		if token == "" {
-			lgr.W.Println("https-cntstr -> нет токена")
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-
-		// Тело запроса
-		var reqBoddy serverAPI.DateNameT
-
-		bytesBody, err := io.ReadAll(r.Body)
-		if err != nil {
-			lgr.W.Println("https-cntstr -> ошибка чтения тела запроса")
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return
-		}
-		defer func() {
-			err = r.Body.Close()
-			if err != nil {
-				lgr.W.Println("https-cntstr -> ошибка закрытия потока чтения тела ответа при завершении работы обработчика")
-			}
-		}()
-
-		err = json.Unmarshal(bytesBody, &reqBoddy)
-		if err != nil {
-
-		}
-
-		// Проверка данных тела запроса
-		_, err = time.Parse("2006-01-02", reqBoddy.Date)
-		if err != nil {
-			lgr.W.Printf("https-cntstr -> в date не дате {%s}", reqBoddy.Date)
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-		if reqBoddy.Name == "" {
-			lgr.W.Println("https-cntstr -> нет данных в name")
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-
-		// Проверка, что принятое имя и его токен соответствуют
-		tokenDB, err := serverAPI.ReadUserTokenByNameDB(reqBoddy.Name, db.Ptr)
-		if err != nil {
-			lgr.W.Printf("https-cntstr -> ошибка при получении токена, по имени пользователя {%v}", err)
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-
-		if token != tokenDB {
-			lgr.W.Println("https-cntstr -> принятый токен и токен из БД не соответствуют")
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-
-		// Получение количества строк по указанной дате
-		d := serverAPI.DataDBCall{
-			StartDate: reqBoddy.Date,
-		}
-		d.DB = db.Ptr
-		d.Lgr = lgr
-
-		err = readCntStrDataDB(&d)
-		if err != nil {
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return
-		}
-
-		cntStr := strconv.Itoa(d.CntStrDB)
-
-		cntInfo := serverAPI.CntStrT{
-			CntStr: cntStr,
-		}
-		bTx, err := json.Marshal(cntInfo)
-		if err != nil {
-			lgr.W.Println("https-cntstr -> ошибка сериализации данных счётчика строк")
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return
-		}
-
-		lgr.I.Printf("https-cntstr -> выполнен запрос количество строк в БД на {%s}", reqBoddy.Date)
-		w.WriteHeader(http.StatusOK)
-		w.Write(bTx)
+		// определется количество строк в БД по указанной дате
+		var cntStr serverAPI.CntStrByDateT
+		cntStr.DB = db.Ptr
+		cntStr.Lgr = lgr
+		cntStr.HandlHttpsCntStrByDate(w, r)
 	})
 
 	r.Post("/partdatadb", func(w http.ResponseWriter, r *http.Request) {
-
-		w.Header().Set("Content-Type", "application-json")
-
-		// Чтение заголовков
-		token := r.Header.Get("authorization")
-		if token == "" {
-			lgr.W.Println("hdlr-partdatadb -> нет токена")
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-
-		// Тело запроса
-		var reqBody serverAPI.DateNameT
-
-		bytesBody, err := io.ReadAll(r.Body)
-		if err != nil {
-			lgr.W.Println("https-partdatadb -> ошибка чтения тела запроса")
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return
-		}
-		defer func() {
-			err = r.Body.Close()
-			if err != nil {
-				lgr.W.Println("https-partdatadb -> ошибка закрытия потока чтения тела ответа при завершении работы обработчика")
-			}
-		}()
-
-		err = json.Unmarshal(bytesBody, &reqBody)
-		if err != nil {
-			lgr.W.Println("https-partdatadb -> ошибка десериализации тела запроса")
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return
-		}
-
-		// Проверка данных тела запроса
-		_, err = time.Parse("2006-01-02", reqBody.Date)
-		if err != nil {
-			lgr.W.Printf("https-partdatadb -> в date не дате {%s}", reqBody.Date)
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-		if reqBody.Name == "" {
-			lgr.W.Println("https-partdatadb -> нет данных в name")
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-
-		// Чтение параметров запроса. Проверка.
-		qP := r.URL.Query()
-
-		RxNumbReg := qP.Get("numbReg")
-		if RxNumbReg == "" {
-			lgr.W.Println("hdlr-partdatadb -> принят запрос с пустым содержимым numbReg")
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-		numbReq, err := strconv.Atoi(RxNumbReg)
-		if err != nil {
-			lgr.W.Printf("hdlr-partdatadb -> принят запрос где в numbReg не число {%s}", RxNumbReg)
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-
-		rxStrLimit := qP.Get("strLimit")
-		if rxStrLimit == "" {
-			lgr.W.Println("hdlr-partdatadb -> принят запрос с пустым содержимым strLimit")
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-		limit, err := strconv.Atoi(rxStrLimit)
-		if err != nil {
-			lgr.W.Printf("hdlr-partdatadb -> принят запрос где в strLimit не число {%s}", rxStrLimit)
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-
-		rxStrOffSet := qP.Get("strOffSet")
-		if rxStrOffSet == "" {
-			lgr.W.Println("hdlr-partdatadb -> принят запрос с пустым содержимым strOffSet")
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-		OffSet, err := strconv.Atoi(rxStrOffSet)
-		if err != nil {
-			lgr.W.Printf("hdlr-partdatadb -> принят запрос где в strOffSet не число {%s}", rxStrOffSet)
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-
-		// Проверка, что принятое имя и его токен соответствуют
-		tokenDB, err := serverAPI.ReadUserTokenByNameDB(reqBody.Name, db.Ptr)
-		if err != nil {
-			lgr.W.Printf("hdlr-partdatadb -> ошибка при получении токена, по имени пользователя {%v}", err)
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-
-		if token != tokenDB {
-			lgr.W.Println("hdlr-partdatadb -> принятый токен и токен из БД не соответствуют")
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
-			return
-		}
-
-		// Чтение данных БД
-		rdDataDB, err := readPartDataDBReq(reqBody.Date, limit, OffSet)
-		if err != nil {
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return
-		}
-
-		// Ответ
-		dataForTx := serverAPI.PartDataDB{
-			NumbReq: numbReq,
-			Data:    rdDataDB,
-		}
-
-		txByte, err := json.Marshal(dataForTx)
-		if err != nil {
-			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-		w.Write(txByte)
-
+		// запрос данных БД
+		var partData serverAPI.PartDataT
+		partData.DB = db.Ptr
+		partData.Lgr = lgr
+		partData.HandlHttpsPartDataDB(w, r)
 	})
 
 	// Запуск HTTPS сервера
@@ -3417,12 +3013,12 @@ func goHttpsServer() {
 // Функция выполняет сбор данных сервера.
 func collectServInfo() {
 
-	srvInfo.MbRTU = make([]serverAPI.InfoModbusRTU, 0)
-	srvInfo.MbTCP = make([]serverAPI.InfoModbusTCP, 0)
+	srvInfo.MbRTU = make([]serverAPI.InfoModbusRTUT, 0)
+	srvInfo.MbTCP = make([]serverAPI.InfoModbusTCPT, 0)
 
 	// Сбор информации по Modbus-RTU
 	for _, v := range hostConnects.mbRTUmaster {
-		mbRTU := serverAPI.InfoModbusRTU{}
+		mbRTU := serverAPI.InfoModbusRTUT{}
 		mbRTU.ConName = v.Name
 		mbRTU.Con = v.Port
 		mbRTU.ConParams.BaudRate = v.ParamsConn.BaudRate
@@ -3435,7 +3031,7 @@ func collectServInfo() {
 
 	// Сбор информации по Modbus-TCP
 	for _, v := range hostConnects.mbTCPmaster {
-		mbTCP := serverAPI.InfoModbusTCP{}
+		mbTCP := serverAPI.InfoModbusTCPT{}
 		mbTCP.ConName = v.Name
 		mbTCP.Con = v.HostIP
 
@@ -3451,269 +3047,4 @@ func collectServInfo() {
 		return
 	}
 
-}
-
-// Функция организации чтения данных из БД. Возвращает ошибку.
-//
-// Параметры:
-//
-// data - стартовая дата выборки и результат выборки.
-func readDataDB(data *serverAPI.DataDBCall) error {
-
-	// Проверка входных данных
-	if data == nil {
-		return errors.New("основная функция запросов -> принят пустой указатель")
-	}
-
-	limit := 100
-	offset := 100
-	sizeRx := limit
-	cnt := 0
-
-	// Запрос на количества строк по указанной дате
-	err := readCntStrDataDB(data)
-	if err != nil {
-		return err
-	}
-
-	// Реализация запроса данных
-	for sizeRx == limit {
-
-		sizeRx, err = readDataDBReq(data, limit, offset*cnt)
-		if err != nil {
-			return err
-		}
-		cnt++
-	}
-
-	return nil
-}
-
-// Функция выполняет чтение из БД архивных данных, по начальной дате. Возвращается ошибка.
-//
-// Параметры:
-//
-// data - стартовая дата выборки и результат выборки.
-// limit - количество строк выборки.
-// offset - смещение выборки.
-func readDataDBReq(data *serverAPI.DataDBCall, limit, offset int) (size int, err error) {
-
-	// Проверка указателя
-	if data == nil {
-		return 0, fmt.Errorf("запрос данных. пустой указатель: {%v}", data)
-	}
-	// Проверка корректной даты
-	rxDate, err := time.Parse("2006-01-02", data.StartDate)
-	if err != nil {
-		return 0, fmt.Errorf("запрос данных. значение начальной даты: {%s}", data.StartDate)
-	}
-	// Проверка корректности значения limit
-	if limit < 1 {
-		return 0, fmt.Errorf("запрос данных. значение limit:{%d} меньше 1", limit)
-	}
-	// Проверка корректности значения offset
-	if offset < 0 {
-		return 0, fmt.Errorf("запрос данных. значение offset:{%d} меньше 0", offset)
-	}
-
-	// Подготовка даты для запроса
-	reqDate := rxDate.Format("2006-01-02")
-
-	q := fmt.Sprintf(`
-	 SELECT name, value, qual, timestamp
-     FROM %s.%s
-     WHERE date(timestamp) = '%v'
-	 ORDER By timestamp ASC
-	 LIMIT %d OFFSET %d
-	 ;              
-	`, os.Getenv("TABLE_SCHEMA"), os.Getenv("TABLE_DATA"), reqDate, limit, offset)
-
-	// Запрос
-	rows, err := db.Ptr.Query(q)
-	if err != nil {
-		return 0, err
-	}
-	defer rows.Close()
-
-	// Обработка ответа
-	cnt := 0
-	localData := make([]serverAPI.DataEl, 0)
-
-	for rows.Next() {
-		var str serverAPI.DataEl
-
-		err = rows.Scan(&str.Name, &str.Value, &str.Qual, &str.TimeStamp)
-		if err != nil {
-			return 0, err
-		}
-		localData = append(localData, str)
-		cnt++
-	}
-
-	if err = rows.Err(); err != nil {
-		return 0, err
-	}
-
-	// Передача локольного содержимого
-	data.Data = append(data.Data, localData...)
-
-	return cnt, nil
-}
-
-// Функция выполняет чтение из БД архивных данных, по начальной дате. Возвращается ошибка.
-//
-// Параметры:
-//
-// data - стартовая дата выборки и результат выборки.
-// limit - количество строк выборки.
-// offset - смещение выборки.
-func readPartDataDBReq(date string, limit, offset int) (rdData []serverAPI.DataEl, err error) {
-
-	// Проверка корректной даты
-	_, err = time.Parse("2006-01-02", date)
-	if err != nil {
-		return nil, fmt.Errorf("запрос данных. значение начальной даты: {%s}", date)
-	}
-	// Проверка корректности значения limit
-	if limit < 1 {
-		return nil, fmt.Errorf("запрос данных. значение limit:{%d} меньше 1", limit)
-	}
-	// Проверка корректности значения offset
-	if offset < 0 {
-		return nil, fmt.Errorf("запрос данных. значение offset:{%d} меньше 0", offset)
-	}
-
-	q := fmt.Sprintf(`
-	 SELECT name, value, qual, timestamp
-     FROM %s.%s
-     WHERE date(timestamp) = '%v'
-	 ORDER By timestamp ASC
-	 LIMIT %d OFFSET %d
-	 ;              
-	`, os.Getenv("TABLE_SCHEMA"), os.Getenv("TABLE_DATA"), date, limit, offset)
-
-	// Запрос
-	rows, err := db.Ptr.Query(q)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	// Обработка ответа
-	cnt := 0
-	rdData = make([]serverAPI.DataEl, 0)
-
-	for rows.Next() {
-		var str serverAPI.DataEl
-
-		err = rows.Scan(&str.Name, &str.Value, &str.Qual, &str.TimeStamp)
-		if err != nil {
-			return nil, err
-		}
-		rdData = append(rdData, str)
-		cnt++
-	}
-
-	if err = rows.Err(); err != nil {
-		return nil, err
-	}
-
-	return rdData, nil
-}
-
-// Функция выполняет запрос с подсчётом количества строк по указанной дате. Возвращает ошибку.
-func readCntStrDataDB(data *serverAPI.DataDBCall) error {
-
-	// Проверка входных данных
-	if data == nil {
-		return errors.New("принят пустой указатель")
-	}
-
-	q := fmt.Sprintf(`
-	SELECT COUNT(*)
-	FROM %s.%s 
-	WHERE date(timestamp) = $1
-	;`, os.Getenv("TABLE_SCHEMA"), os.Getenv("TABLE_DATA"))
-
-	err := data.DB.QueryRow(q, data.StartDate).Scan(&data.CntStrDB)
-	if err != nil {
-		return fmt.Errorf("ошибка при запросе количества строк по дате {%d}: {%v}", data.CntStrDB, err)
-	}
-
-	return nil
-}
-
-// Функция сохраняет данные БД в xlsx файл. Возвращает ошибку.
-//
-// Параметры:
-//
-// fileName - имя файла
-// data - данные
-func saveDataDBXlsx(fileName string, data serverAPI.DataDBCall) (err error) {
-
-	// Открытие файла
-	file, err := excelize.OpenFile(fileName)
-	if err != nil {
-		return fmt.Errorf("ошибка при открытии файла: {%v}", fileName)
-	}
-	defer func() {
-		err := file.Close()
-		if err != nil {
-			lgr.E.Printf("ошибка {%v} при зарытии фалй {%s} после заполнения данными", err, fileName)
-		}
-	}()
-
-	// Заполнение файла
-
-	nameSheet := "DataDB"
-
-	// Формирование заголовков
-	// Name: Value:	Quality: TimeStamp:
-	err = file.SetCellValue(nameSheet, "A1", "Name:")
-	if err != nil {
-		return errors.New("ошибка при добавлении заголовка столбца Name")
-	}
-	err = file.SetCellValue(nameSheet, "B1", "Value:")
-	if err != nil {
-		return errors.New("ошибка при добавлении заголовка столбца Value")
-	}
-	err = file.SetCellValue(nameSheet, "C1", "Quality:")
-	if err != nil {
-		return errors.New("ошибка при добавлении заголовка столбца Quality")
-	}
-	err = file.SetCellValue(nameSheet, "D1", "TimeStamp:")
-	if err != nil {
-		return errors.New("ошибка при добавлении заголовка столбца TimeStamp")
-	}
-
-	// Перенос данных
-	for i, str := range data.Data {
-
-		i++
-
-		err = file.SetCellValue(nameSheet, fmt.Sprintf("A%d", i), str.Name)
-		if err != nil {
-			return fmt.Errorf("ошибка добавления значения {%s} в ячейку {A%d}", str.Name, i)
-		}
-		err = file.SetCellValue(nameSheet, fmt.Sprintf("B%d", i), str.Value)
-		if err != nil {
-			return fmt.Errorf("ошибка добавления значения {%s} в ячейку {B%d}", str.Value, i)
-		}
-		err = file.SetCellValue(nameSheet, fmt.Sprintf("C%d", i), str.Qual)
-		if err != nil {
-			return fmt.Errorf("ошибка добавления значения {%s} в ячейку {C%d}", str.Qual, i)
-		}
-		err = file.SetCellValue(nameSheet, fmt.Sprintf("D%d", i), str.TimeStamp)
-		if err != nil {
-			return fmt.Errorf("ошибка добавления значения {%s} в ячейку {D%d}", str.TimeStamp, i)
-		}
-	}
-
-	// Сохранение
-	err = file.Save()
-	if err != nil {
-		return fmt.Errorf("ошибка {%v} при сохранении фала {%s} после заполнения данными", err, fileName)
-	}
-
-	return nil
 }

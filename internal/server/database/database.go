@@ -1,10 +1,13 @@
 package database
 
 import (
+	"blackbox/internal/server/serverAPI"
 	"crypto/sha256"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
+	"time"
 	"unicode/utf8"
 
 	_ "github.com/lib/pq"
@@ -335,4 +338,136 @@ func (db *DB_Object) SetPswUser(name string) error {
 	}
 
 	return nil
+}
+
+// Функция организации чтения данных из БД. Возвращает ошибку.
+//
+// Параметры:
+//
+// data - данные для выполнения чтения
+func ReadDataDB(data *serverAPI.DataDBCallT) error {
+
+	// Проверка входных данных
+	if data == nil {
+		return errors.New("основная функция запросов -> принят пустой указатель")
+	}
+	if data.DB == nil {
+		return errors.New("основная функция запросов -> нет указателя на БД")
+	}
+
+	limit := 100
+	offset := 100
+	sizeRx := limit
+	cnt := 0
+
+	// Запрос на количества строк по указанной дате
+	err := ReadCntStrDataDB(data)
+	if err != nil {
+		return err
+	}
+
+	// Реализация запроса данных
+	for sizeRx == limit {
+
+		sizeRx, err = ReadDataDBReq(data, limit, offset*cnt)
+		if err != nil {
+			return err
+		}
+		cnt++
+	}
+
+	return nil
+}
+
+// Функция выполняет запрос с подсчётом количества строк по указанной дате. Возвращает ошибку.
+func ReadCntStrDataDB(data *serverAPI.DataDBCallT) error {
+
+	// Проверка входных данных
+	if data == nil {
+		return errors.New("принят пустой указатель")
+	}
+
+	q := fmt.Sprintf(`
+	SELECT COUNT(*)
+	FROM %s.%s 
+	WHERE date(timestamp) = $1
+	;`, os.Getenv("TABLE_SCHEMA"), os.Getenv("TABLE_DATA"))
+
+	err := data.DB.QueryRow(q, data.StartDate).Scan(&data.CntStrDB)
+	if err != nil {
+		return fmt.Errorf("ошибка при запросе количества строк по дате {%d}: {%v}", data.CntStrDB, err)
+	}
+
+	return nil
+}
+
+// Функция выполняет чтение из БД архивных данных, по начальной дате. Возвращается ошибка.
+//
+// Параметры:
+//
+// data - стартовая дата выборки и результат выборки.
+// limit - количество строк выборки.
+// offset - смещение выборки.
+func ReadDataDBReq(data *serverAPI.DataDBCallT, limit, offset int) (size int, err error) {
+
+	// Проверка аргументов
+	if data == nil {
+		return 0, fmt.Errorf("запрос данных. пустой указатель: {%v}", data)
+	}
+	if data.DB == nil {
+		return 0, errors.New("запрос данных. нет указателя на БД")
+	}
+	rxDate, err := time.Parse("2006-01-02", data.StartDate)
+	if err != nil {
+		return 0, fmt.Errorf("запрос данных. значение начальной даты: {%s}", data.StartDate)
+	}
+	if limit < 1 {
+		return 0, fmt.Errorf("запрос данных. значение limit:{%d} меньше 1", limit)
+	}
+	if offset < 0 {
+		return 0, fmt.Errorf("запрос данных. значение offset:{%d} меньше 0", offset)
+	}
+
+	// Подготовка даты для запроса
+	reqDate := rxDate.Format("2006-01-02")
+
+	q := fmt.Sprintf(`
+	 SELECT name, value, qual, timestamp
+     FROM %s.%s
+     WHERE date(timestamp) = '%v'
+	 ORDER By timestamp ASC
+	 LIMIT %d OFFSET %d
+	 ;              
+	`, os.Getenv("TABLE_SCHEMA"), os.Getenv("TABLE_DATA"), reqDate, limit, offset)
+
+	// Запрос
+	rows, err := data.DB.Query(q)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+
+	// Обработка ответа
+	cnt := 0
+	localData := make([]serverAPI.DataElT, 0)
+
+	for rows.Next() {
+		var str serverAPI.DataElT
+
+		err = rows.Scan(&str.Name, &str.Value, &str.Qual, &str.TimeStamp)
+		if err != nil {
+			return 0, err
+		}
+		localData = append(localData, str)
+		cnt++
+	}
+
+	if err = rows.Err(); err != nil {
+		return 0, err
+	}
+
+	// Передача локольного содержимого
+	data.Data = append(data.Data, localData...)
+
+	return cnt, nil
 }
