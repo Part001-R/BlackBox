@@ -13,7 +13,6 @@ type (
 		W        *log.Logger
 		E        *log.Logger
 		CloseAll func() error
-		//isRun    bool
 	}
 )
 

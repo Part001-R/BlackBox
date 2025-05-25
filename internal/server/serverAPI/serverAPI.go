@@ -34,7 +34,7 @@ type (
 	}
 
 	// Для передачи состояния сервера
-	StatusServerCallT struct {
+	StatusServerT struct {
 		TimeStart string
 		MbRTU     []InfoModbusRTUT
 		MbTCP     []InfoModbusTCPT
@@ -123,14 +123,31 @@ type (
 )
 
 // Обработчик запроса на предоставление состояния Go рутин
-func (el *StatusServerCallT) HandlHttpsStatusSrv(w http.ResponseWriter, r *http.Request) {
+func (el *StatusServerT) HandlHttpsStatusSrv(w http.ResponseWriter, r *http.Request) {
 
-	w.Header().Set("Content-Type", "application/json")
+	// Проверка указателя на БД
+	if el.DB == nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	// Проверка указателей логеров
+	if el.Lgr.I == nil || el.Lgr.W == nil || el.Lgr.E == nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	// Проверка метода запроса
+	if r.Method != http.MethodPost {
+		el.Lgr.W.Printf("https-status -> принят запрос с методом {%s}, а нужен {%s}", r.Method, http.MethodPost)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
 
 	// Чтение заголовков звпроса
 	token := r.Header.Get("authorization")
 	if token == "" {
-		el.Lgr.W.Println("https-status -> нет токена, в запроск")
+		el.Lgr.W.Println("https-status -> нет токена, в запросе")
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
@@ -188,12 +205,13 @@ func (el *StatusServerCallT) HandlHttpsStatusSrv(w http.ResponseWriter, r *http.
 
 	// Передача данных
 	el.Lgr.I.Printf("https-status -> пользователь {%s} запросил состояние сервера", rxBody.Name)
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write(resp)
 }
 
 // Обработчик запроса на предоставление состояния Go рутин
-func (el *StatusServerCallT) HandlHttpStatusSrv(w http.ResponseWriter, r *http.Request) {
+func (el *StatusServerT) HandlHttpStatusSrv(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 

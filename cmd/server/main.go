@@ -84,7 +84,7 @@ var (
 	lgr          loger.Log_Object
 	cnfImport    libre.ConfXLSX_Import
 	cmdArgs      map[string][]string
-	srvInfo      serverAPI.StatusServerCallT
+	srvInfo      serverAPI.StatusServerT
 	hostConnects connects
 )
 
@@ -2966,7 +2966,7 @@ func goHttpsServer() {
 		// предоставляет сводные данные состояние сервера
 		collectServInfo()
 
-		var srvInfo serverAPI.StatusServerCallT
+		var srvInfo serverAPI.StatusServerT
 		srvInfo.DB = db.Ptr
 		srvInfo.Lgr = lgr
 		srvInfo.HandlHttpsStatusSrv(w, r)
