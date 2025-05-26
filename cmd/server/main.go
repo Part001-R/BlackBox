@@ -112,7 +112,7 @@ func prepare() {
 
 	// Фиксация времени запуска
 	timeStart := time.Now()
-	srvInfo.TimeStart = timeStart.Format("02-01-2006 15:04:05")
+	srvInfo.TimeStart = timeStart.Format("2006-01-02 15:04:05")
 
 	// Чтение переменных окружения
 	err := godotenv.Load("./configs/.env")
@@ -2963,13 +2963,19 @@ func goHttpsServer() {
 	r := chi.NewRouter()
 
 	r.Post("/status", func(w http.ResponseWriter, r *http.Request) {
-		// предоставляет сводные данные состояние сервера
-		collectServInfo()
 
-		var srvInfo serverAPI.StatusServerT
-		srvInfo.DB = db.Ptr
-		srvInfo.Lgr = lgr
-		srvInfo.HandlHttpsStatusSrv(w, r)
+		// предоставляет сводные данные состояние сервера
+		srvData, err := collectServInfo()
+		if err != nil {
+			lgr.E.Printf("https - status -> ошибка при сборе данных: {%s}", err)
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+		// дополнение данными и запуск обработчика
+		srvData.TimeStart = srvInfo.TimeStart
+		srvData.DB = db.Ptr
+		srvData.Lgr = lgr
+		srvData.HandlHttpsStatusSrv(w, r)
 	})
 
 	r.Post("/registration", func(w http.ResponseWriter, r *http.Request) {
@@ -3010,11 +3016,13 @@ func goHttpsServer() {
 	}
 }
 
-// Функция выполняет сбор данных сервера.
-func collectServInfo() {
+// Функция выполняет сбор данных состояния сервера.
+func collectServInfo() (info serverAPI.StatusServerT, err error) {
 
-	srvInfo.MbRTU = make([]serverAPI.InfoModbusRTUT, 0)
-	srvInfo.MbTCP = make([]serverAPI.InfoModbusTCPT, 0)
+	info = serverAPI.StatusServerT{}
+
+	info.MbRTU = make([]serverAPI.InfoModbusRTUT, 0)
+	info.MbTCP = make([]serverAPI.InfoModbusTCPT, 0)
 
 	// Сбор информации по Modbus-RTU
 	for _, v := range hostConnects.mbRTUmaster {
@@ -3026,7 +3034,7 @@ func collectServInfo() {
 		mbRTU.ConParams.Parity = v.ParamsConn.Parity
 		mbRTU.ConParams.StopBits = v.ParamsConn.StopBits
 
-		srvInfo.MbRTU = append(srvInfo.MbRTU, mbRTU)
+		info.MbRTU = append(srvInfo.MbRTU, mbRTU)
 	}
 
 	// Сбор информации по Modbus-TCP
@@ -3035,16 +3043,15 @@ func collectServInfo() {
 		mbTCP.ConName = v.Name
 		mbTCP.Con = v.HostIP
 
-		srvInfo.MbTCP = append(srvInfo.MbTCP, mbTCP)
+		info.MbTCP = append(srvInfo.MbTCP, mbTCP)
 	}
 
 	// Получение информации о размерности файлов логера
-	var err error
-
 	srvInfo.SizeF.I, srvInfo.SizeF.W, srvInfo.SizeF.E, err = lgr.SizeFiles()
 	if err != nil {
-		lgr.E.Printf("ошибка при получении размерности файлов логера:{%v}\n", err)
-		return
+		return serverAPI.StatusServerT{}, fmt.Errorf("ошибка при получении размеров файлов лога: {%s}", err)
 	}
+
+	return info, nil
 
 }

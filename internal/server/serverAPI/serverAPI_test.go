@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -23,26 +24,146 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const (
+	// Для тестов необходима учётная запись в БД
+	userName      = "user222"
+	userPassw     = "222"
+	dateReqCntStr = "2025-05-17"
+)
+
 // =====================================================
 // ====                Тесты HTTPS                  ====
 // =====================================================
 
-// Обработчик запроса на состояние сервера (Успешность)
-func Test_HandlHttpsStatusSrv_Success(t *testing.T) {
-
-	// Данные пользователя из БД
-	userName := "user222"
-	userToken := "b5570b12e802f1a4930921edc737065fce2a95d168ace66e749d4852d74410b0"
-
-	// Фиксация времени запуска
-	tn := time.Now()
-	timeStart := tn.Format("02-01-2006 15:04:05")
+// Регистрация пользователя на сервере (Успешность)
+func Test_HandlHttpsRegistration_Success(t *testing.T) {
 
 	// Подключение к логеру и БД
 	var lger loger.Log_Object
 
 	db, err := openConnLogDB(&lger)
 	require.NoErrorf(t, err, "подключение к БД и Логеру - ожидалось отсутствие ошибки, а принято: %s", fmt.Sprintf("%v", err))
+
+	defer func() {
+		err = closeConn(db, &lger)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}()
+
+	// Тело запроса (имя + пароль)
+	bodyReq := bytes.NewBuffer([]byte(fmt.Sprintf("%s %s", userName, userPassw)))
+
+	// Создание запроса и приёмника ответа
+	req := httptest.NewRequest(http.MethodPost, "/registration", bodyReq)
+	res := httptest.NewRecorder()
+
+	// Инициализация и запрос
+	var user LoginUserT
+	user.DB = db
+	user.Lgr = lger
+	user.HandlHttpsRegistration(res, req)
+
+	// Чтение тела ответа
+	byteRx, err := io.ReadAll(res.Body)
+	require.NoErrorf(t, err, "ошибка чтения тела ответа: {%v}", err)
+
+	var dataRx TokenT
+	err = json.Unmarshal(byteRx, &dataRx)
+	require.NoErrorf(t, err, "ошибка десериализации тела ответа: {%v}", err)
+
+	// Чтение токена из БД
+	tokenDB, err := ReadUserTokenByNameDB(userName, db)
+	require.NoErrorf(t, err, "ошибка при чтении токена из БД по имени пользователя: {%v}", err)
+
+	// Проверка соответствия токенов
+	assert.Equalf(t, tokenDB, dataRx.Token, "токены не равны. в БД {%s}, а принят {%s}", tokenDB, dataRx.Token)
+}
+
+// Регистрация пользователя на сервере (Ошибки)
+func Test_HandlHttpsRegistration_Error(t *testing.T) {
+
+	// Подключение к логеру и БД
+	var lger loger.Log_Object
+
+	db, err := openConnLogDB(&lger)
+	require.NoErrorf(t, err, "подключение к БД и Логеру - ожидалось отсутствие ошибки, а принято: %s", fmt.Sprintf("%v", err))
+
+	defer func() {
+		err = closeConn(db, &lger)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}()
+
+	dataTest := []struct {
+		testName   string
+		methodHttp string
+		user       string
+		pwd        string
+		wantErr    int
+	}{
+		{
+			testName:   "метод запроса не POST",
+			methodHttp: "GET",
+			user:       userName,
+			pwd:        userPassw,
+			wantErr:    400,
+		},
+		{
+			testName:   "пустое поле user",
+			methodHttp: "POST",
+			user:       "",
+			pwd:        userPassw,
+			wantErr:    400,
+		},
+		{
+			testName:   "пустое поле pwd",
+			methodHttp: "POST",
+			user:       userName,
+			pwd:        "",
+			wantErr:    400,
+		},
+	}
+
+	for _, tt := range dataTest {
+		t.Run(tt.testName, func(t *testing.T) {
+
+			// Тело запроса (имя + пароль)
+			bodyReq := bytes.NewBuffer([]byte(fmt.Sprintf("%s %s", tt.user, tt.pwd)))
+
+			req := httptest.NewRequest(tt.methodHttp, "/registration", bodyReq)
+			res := httptest.NewRecorder()
+
+			// Инициализация и запрос
+			var user LoginUserT
+			user.DB = db
+			user.Lgr = lger
+			user.HandlHttpsRegistration(res, req)
+			assert.Equalf(t, tt.wantErr, res.Result().StatusCode, "ожидаля код: {%d}, а принят: {%d}", tt.wantErr, res.Result().StatusCode)
+		})
+	}
+}
+
+// Обработчик запроса на состояние сервера (Успешность)
+func Test_HandlHttpsStatusSrv_Success(t *testing.T) {
+
+	// Фиксация времени запуска
+	tn := time.Now()
+	timeStart := tn.Format("2006-01-02 15:04:05")
+
+	// Подключение к логеру и БД
+	var lger loger.Log_Object
+
+	db, err := openConnLogDB(&lger)
+	require.NoErrorf(t, err, "подключение к БД и Логеру - ожидалось отсутствие ошибки, а принято: %s", fmt.Sprintf("%v", err))
+
+	defer func() {
+		err = closeConn(db, &lger)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}()
 
 	// Подготовка сводных данных сервера
 	infoMbRTU := make([]InfoModbusRTUT, 0)
@@ -95,6 +216,10 @@ func Test_HandlHttpsStatusSrv_Success(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/status", reqBody)
 
+	// Чтение токена из БД
+	userToken, err := ReadUserTokenByNameDB(userName, db)
+	require.NoErrorf(t, err, "ошибка при чтении токена из БД: {%v}", err)
+
 	req.Header.Set("authorization", userToken)
 
 	// Создание приёмника ответа от обработчика запроса
@@ -128,11 +253,901 @@ func Test_HandlHttpsStatusSrv_Success(t *testing.T) {
 		assert.Equalf(t, v.ConName, dataRx.MbTCP[i].ConName, "нет соответствия в названии конекта MbTCP по id[%d] - ожидалось {%s}, а принято {%s}", i, v.ConName, dataRx.MbTCP[i].ConName)
 		assert.Equalf(t, v.Con, dataRx.MbTCP[i].Con, "нет соответствия в названии конекта MbTCP по id[%d] - ожидалось {%s}, а принято {%s}", i, v.Con, dataRx.MbTCP[i].Con)
 	}
+}
 
-	// Закрытие подключений к логеру и БД
-	err = closeConn(db, &lger)
-	if err != nil {
-		log.Fatal(err)
+// Обработчик запроса на состояние сервера (Ошибки)
+func Test_HandlHttpsStatusSrv_Error(t *testing.T) {
+
+	// Фиксация времени запуска
+	tn := time.Now()
+	timeStart := tn.Format("2006-01-02 15:04:05")
+
+	// Подключение к логеру и БД
+	var lger loger.Log_Object
+
+	db, err := openConnLogDB(&lger)
+	require.NoErrorf(t, err, "подключение к БД и Логеру - ожидалось отсутствие ошибки, а принято: %s", fmt.Sprintf("%v", err))
+
+	defer func() {
+		err = closeConn(db, &lger)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}()
+
+	// Чтение токена из БД
+	userToken, err := ReadUserTokenByNameDB(userName, db)
+	require.NoErrorf(t, err, "ошибка при чтении токена из БД: {%v}", err)
+
+	// Набор данных для тестов
+	dataTest := []struct {
+		testName   string
+		httpMethod string
+		serverInfo StatusServerT
+		wantErr    int
+	}{
+		{
+			testName:   "неподдерживаемый метод запроса",
+			httpMethod: "GET",
+			serverInfo: StatusServerT{
+				TimeStart: timeStart,
+				MbRTU: []InfoModbusRTUT{
+					{
+						ConName: "Con2",
+						Con:     "/dev/ttyUSB0",
+						ConParams: struct {
+							BaudRate int
+							DataBits int
+							Parity   string
+							StopBits int
+						}{
+							BaudRate: 9600,
+							DataBits: 8,
+							Parity:   "N",
+							StopBits: 1,
+						},
+					},
+				},
+				MbTCP: []InfoModbusTCPT{
+					{
+						ConName: "Con1",
+						Con:     "192.168.122.1",
+					},
+				},
+				SizeF: SizeFilesT{
+					I: 1,
+					W: 2,
+					E: 3,
+				},
+				DB:  db,
+				Lgr: lger,
+			},
+			wantErr: 400,
+		},
+		{
+			testName:   "нет даты запуска",
+			httpMethod: "POST",
+			serverInfo: StatusServerT{
+				TimeStart: "",
+				MbRTU: []InfoModbusRTUT{
+					{
+						ConName: "Con2",
+						Con:     "/dev/ttyUSB0",
+						ConParams: struct {
+							BaudRate int
+							DataBits int
+							Parity   string
+							StopBits int
+						}{
+							BaudRate: 9600,
+							DataBits: 8,
+							Parity:   "N",
+							StopBits: 1,
+						},
+					},
+				},
+				MbTCP: []InfoModbusTCPT{
+					{
+						ConName: "Con1",
+						Con:     "192.168.122.1",
+					},
+				},
+				SizeF: SizeFilesT{
+					I: 1,
+					W: 2,
+					E: 3,
+				},
+				DB:  db,
+				Lgr: lger,
+			},
+			wantErr: 500,
+		},
+		{
+			testName:   "нет соответствия в формате времени запуска. Формат YYYY-MM-DD HH-MM-SS",
+			httpMethod: "POST",
+			serverInfo: StatusServerT{
+				TimeStart: "2006-01-02",
+				MbRTU: []InfoModbusRTUT{
+					{
+						ConName: "Con2",
+						Con:     "/dev/ttyUSB0",
+						ConParams: struct {
+							BaudRate int
+							DataBits int
+							Parity   string
+							StopBits int
+						}{
+							BaudRate: 9600,
+							DataBits: 8,
+							Parity:   "N",
+							StopBits: 1,
+						},
+					},
+				},
+				MbTCP: []InfoModbusTCPT{
+					{
+						ConName: "Con1",
+						Con:     "192.168.122.1",
+					},
+				},
+				SizeF: SizeFilesT{
+					I: 1,
+					W: 2,
+					E: 3,
+				},
+				DB:  db,
+				Lgr: lger,
+			},
+			wantErr: 500,
+		},
+		{
+			testName:   "нет данных по RTU",
+			httpMethod: "POST",
+			serverInfo: StatusServerT{
+				TimeStart: timeStart,
+				MbRTU:     []InfoModbusRTUT{},
+				MbTCP: []InfoModbusTCPT{
+					{
+						ConName: "Con1",
+						Con:     "192.168.122.1",
+					},
+				},
+				SizeF: SizeFilesT{
+					I: 1,
+					W: 2,
+					E: 3,
+				},
+				DB:  db,
+				Lgr: lger,
+			},
+			wantErr: 500,
+		},
+		{
+			testName:   "нет данных в названии коннекта RTU",
+			httpMethod: "POST",
+			serverInfo: StatusServerT{
+				TimeStart: timeStart,
+				MbRTU: []InfoModbusRTUT{
+					{
+						ConName: "",
+						Con:     "/dev/ttyUSB0",
+						ConParams: struct {
+							BaudRate int
+							DataBits int
+							Parity   string
+							StopBits int
+						}{
+							BaudRate: 9600,
+							DataBits: 8,
+							Parity:   "N",
+							StopBits: 1,
+						},
+					},
+				},
+				MbTCP: []InfoModbusTCPT{
+					{
+						ConName: "Con1",
+						Con:     "192.168.122.1",
+					},
+				},
+				SizeF: SizeFilesT{
+					I: 1,
+					W: 2,
+					E: 3,
+				},
+				DB:  db,
+				Lgr: lger,
+			},
+			wantErr: 500,
+		},
+		{
+			testName:   "нет данных в подключения RTU",
+			httpMethod: "POST",
+			serverInfo: StatusServerT{
+				TimeStart: timeStart,
+				MbRTU: []InfoModbusRTUT{
+					{
+						ConName: "Con1",
+						Con:     "",
+						ConParams: struct {
+							BaudRate int
+							DataBits int
+							Parity   string
+							StopBits int
+						}{
+							BaudRate: 9600,
+							DataBits: 8,
+							Parity:   "N",
+							StopBits: 1,
+						},
+					},
+				},
+				MbTCP: []InfoModbusTCPT{
+					{
+						ConName: "Con1",
+						Con:     "192.168.122.1",
+					},
+				},
+				SizeF: SizeFilesT{
+					I: 1,
+					W: 2,
+					E: 3,
+				},
+				DB:  db,
+				Lgr: lger,
+			},
+			wantErr: 500,
+		},
+		{
+			testName:   "нет данных по скорости, в параметрах коннекта RTU",
+			httpMethod: "POST",
+			serverInfo: StatusServerT{
+				TimeStart: timeStart,
+				MbRTU: []InfoModbusRTUT{
+					{
+						ConName: "Con1",
+						Con:     "/dev/ttyUSB0",
+						ConParams: struct {
+							BaudRate int
+							DataBits int
+							Parity   string
+							StopBits int
+						}{
+							BaudRate: 0,
+							DataBits: 8,
+							Parity:   "N",
+							StopBits: 1,
+						},
+					},
+				},
+				MbTCP: []InfoModbusTCPT{
+					{
+						ConName: "Con1",
+						Con:     "192.168.122.1",
+					},
+				},
+				SizeF: SizeFilesT{
+					I: 1,
+					W: 2,
+					E: 3,
+				},
+				DB:  db,
+				Lgr: lger,
+			},
+			wantErr: 500,
+		},
+		{
+			testName:   "нет данных по битам данных, в параметрах коннекта RTU",
+			httpMethod: "POST",
+			serverInfo: StatusServerT{
+				TimeStart: timeStart,
+				MbRTU: []InfoModbusRTUT{
+					{
+						ConName: "Con1",
+						Con:     "/dev/ttyUSB0",
+						ConParams: struct {
+							BaudRate int
+							DataBits int
+							Parity   string
+							StopBits int
+						}{
+							BaudRate: 9600,
+							DataBits: 0,
+							Parity:   "N",
+							StopBits: 1,
+						},
+					},
+				},
+				MbTCP: []InfoModbusTCPT{
+					{
+						ConName: "Con1",
+						Con:     "192.168.122.1",
+					},
+				},
+				SizeF: SizeFilesT{
+					I: 1,
+					W: 2,
+					E: 3,
+				},
+				DB:  db,
+				Lgr: lger,
+			},
+			wantErr: 500,
+		},
+		{
+			testName:   "нет данных по чётности, в параметрах коннекта RTU",
+			httpMethod: "POST",
+			serverInfo: StatusServerT{
+				TimeStart: timeStart,
+				MbRTU: []InfoModbusRTUT{
+					{
+						ConName: "Con1",
+						Con:     "/dev/ttyUSB0",
+						ConParams: struct {
+							BaudRate int
+							DataBits int
+							Parity   string
+							StopBits int
+						}{
+							BaudRate: 9600,
+							DataBits: 8,
+							Parity:   "",
+							StopBits: 1,
+						},
+					},
+				},
+				MbTCP: []InfoModbusTCPT{
+					{
+						ConName: "Con1",
+						Con:     "192.168.122.1",
+					},
+				},
+				SizeF: SizeFilesT{
+					I: 1,
+					W: 2,
+					E: 3,
+				},
+				DB:  db,
+				Lgr: lger,
+			},
+			wantErr: 500,
+		},
+		{
+			testName:   "нет данных по стоп битам, в параметрах коннекта RTU",
+			httpMethod: "POST",
+			serverInfo: StatusServerT{
+				TimeStart: timeStart,
+				MbRTU: []InfoModbusRTUT{
+					{
+						ConName: "Con1",
+						Con:     "/dev/ttyUSB0",
+						ConParams: struct {
+							BaudRate int
+							DataBits int
+							Parity   string
+							StopBits int
+						}{
+							BaudRate: 9600,
+							DataBits: 8,
+							Parity:   "N",
+							StopBits: 0,
+						},
+					},
+				},
+				MbTCP: []InfoModbusTCPT{
+					{
+						ConName: "Con1",
+						Con:     "192.168.122.1",
+					},
+				},
+				SizeF: SizeFilesT{
+					I: 1,
+					W: 2,
+					E: 3,
+				},
+				DB:  db,
+				Lgr: lger,
+			},
+			wantErr: 500,
+		},
+		{
+			testName:   "нет данных по TCP",
+			httpMethod: "POST",
+			serverInfo: StatusServerT{
+				TimeStart: timeStart,
+				MbRTU: []InfoModbusRTUT{
+					{
+						ConName: "Con2",
+						Con:     "/dev/ttyUSB0",
+						ConParams: struct {
+							BaudRate int
+							DataBits int
+							Parity   string
+							StopBits int
+						}{
+							BaudRate: 9600,
+							DataBits: 8,
+							Parity:   "N",
+							StopBits: 1,
+						},
+					},
+				},
+				MbTCP: []InfoModbusTCPT{},
+				SizeF: SizeFilesT{
+					I: 1,
+					W: 2,
+					E: 3,
+				},
+				DB:  db,
+				Lgr: lger,
+			},
+			wantErr: 500,
+		},
+		{
+			testName:   "нет данных по имени коннекта TCP",
+			httpMethod: "POST",
+			serverInfo: StatusServerT{
+				TimeStart: timeStart,
+				MbRTU: []InfoModbusRTUT{
+					{
+						ConName: "Con1",
+						Con:     "/dev/ttyUSB0",
+						ConParams: struct {
+							BaudRate int
+							DataBits int
+							Parity   string
+							StopBits int
+						}{
+							BaudRate: 9600,
+							DataBits: 8,
+							Parity:   "N",
+							StopBits: 1,
+						},
+					},
+				},
+				MbTCP: []InfoModbusTCPT{
+					{
+						ConName: "",
+						Con:     "192.168.122.1",
+					},
+				},
+				SizeF: SizeFilesT{
+					I: 1,
+					W: 2,
+					E: 3,
+				},
+				DB:  db,
+				Lgr: lger,
+			},
+			wantErr: 500,
+		},
+		{
+			testName:   "нет данных по коннекту TCP",
+			httpMethod: "POST",
+			serverInfo: StatusServerT{
+				TimeStart: timeStart,
+				MbRTU: []InfoModbusRTUT{
+					{
+						ConName: "Con1",
+						Con:     "/dev/ttyUSB0",
+						ConParams: struct {
+							BaudRate int
+							DataBits int
+							Parity   string
+							StopBits int
+						}{
+							BaudRate: 9600,
+							DataBits: 8,
+							Parity:   "N",
+							StopBits: 1,
+						},
+					},
+				},
+				MbTCP: []InfoModbusTCPT{
+					{
+						ConName: "Con1",
+						Con:     "",
+					},
+				},
+				SizeF: SizeFilesT{
+					I: 1,
+					W: 2,
+					E: 3,
+				},
+				DB:  db,
+				Lgr: lger,
+			},
+			wantErr: 500,
+		},
+		{
+			testName:   "отрицательный размер файла логера I",
+			httpMethod: "POST",
+			serverInfo: StatusServerT{
+				TimeStart: timeStart,
+				MbRTU: []InfoModbusRTUT{
+					{
+						ConName: "Con2",
+						Con:     "/dev/ttyUSB0",
+						ConParams: struct {
+							BaudRate int
+							DataBits int
+							Parity   string
+							StopBits int
+						}{
+							BaudRate: 9600,
+							DataBits: 8,
+							Parity:   "N",
+							StopBits: 1,
+						},
+					},
+				},
+				MbTCP: []InfoModbusTCPT{
+					{
+						ConName: "Con1",
+						Con:     "192.168.122.1",
+					},
+				},
+				SizeF: SizeFilesT{
+					I: -1,
+					W: 2,
+					E: 3,
+				},
+				DB:  db,
+				Lgr: lger,
+			},
+			wantErr: 500,
+		},
+		{
+			testName:   "отрицательный размер файла логера W",
+			httpMethod: "POST",
+			serverInfo: StatusServerT{
+				TimeStart: timeStart,
+				MbRTU: []InfoModbusRTUT{
+					{
+						ConName: "Con2",
+						Con:     "/dev/ttyUSB0",
+						ConParams: struct {
+							BaudRate int
+							DataBits int
+							Parity   string
+							StopBits int
+						}{
+							BaudRate: 9600,
+							DataBits: 8,
+							Parity:   "N",
+							StopBits: 1,
+						},
+					},
+				},
+				MbTCP: []InfoModbusTCPT{
+					{
+						ConName: "Con1",
+						Con:     "192.168.122.1",
+					},
+				},
+				SizeF: SizeFilesT{
+					I: 1,
+					W: -2,
+					E: 3,
+				},
+				DB:  db,
+				Lgr: lger,
+			},
+			wantErr: 500,
+		},
+		{
+			testName:   "отрицательный размер файла логера E",
+			httpMethod: "POST",
+			serverInfo: StatusServerT{
+				TimeStart: timeStart,
+				MbRTU: []InfoModbusRTUT{
+					{
+						ConName: "Con2",
+						Con:     "/dev/ttyUSB0",
+						ConParams: struct {
+							BaudRate int
+							DataBits int
+							Parity   string
+							StopBits int
+						}{
+							BaudRate: 9600,
+							DataBits: 8,
+							Parity:   "N",
+							StopBits: 1,
+						},
+					},
+				},
+				MbTCP: []InfoModbusTCPT{
+					{
+						ConName: "Con1",
+						Con:     "192.168.122.1",
+					},
+				},
+				SizeF: SizeFilesT{
+					I: 1,
+					W: 2,
+					E: -3,
+				},
+				DB:  db,
+				Lgr: lger,
+			},
+			wantErr: 500,
+		},
+		{
+			testName:   "нет указателя на БД",
+			httpMethod: "POST",
+			serverInfo: StatusServerT{
+				TimeStart: timeStart,
+				MbRTU: []InfoModbusRTUT{
+					{
+						ConName: "Con2",
+						Con:     "/dev/ttyUSB0",
+						ConParams: struct {
+							BaudRate int
+							DataBits int
+							Parity   string
+							StopBits int
+						}{
+							BaudRate: 9600,
+							DataBits: 8,
+							Parity:   "N",
+							StopBits: 1,
+						},
+					},
+				},
+				MbTCP: []InfoModbusTCPT{
+					{
+						ConName: "Con1",
+						Con:     "192.168.122.1",
+					},
+				},
+				SizeF: SizeFilesT{
+					I: 1,
+					W: 2,
+					E: 3,
+				},
+				DB:  nil,
+				Lgr: lger,
+			},
+			wantErr: 500,
+		},
+		{
+			testName:   "нет указателя на логер",
+			httpMethod: "POST",
+			serverInfo: StatusServerT{
+				TimeStart: timeStart,
+				MbRTU: []InfoModbusRTUT{
+					{
+						ConName: "Con2",
+						Con:     "/dev/ttyUSB0",
+						ConParams: struct {
+							BaudRate int
+							DataBits int
+							Parity   string
+							StopBits int
+						}{
+							BaudRate: 9600,
+							DataBits: 8,
+							Parity:   "N",
+							StopBits: 1,
+						},
+					},
+				},
+				MbTCP: []InfoModbusTCPT{
+					{
+						ConName: "Con1",
+						Con:     "192.168.122.1",
+					},
+				},
+				SizeF: SizeFilesT{
+					I: 1,
+					W: 2,
+					E: 3,
+				},
+				DB:  db,
+				Lgr: loger.Log_Object{},
+			},
+			wantErr: 500,
+		},
+	}
+
+	for _, tt := range dataTest {
+		t.Run(tt.testName, func(t *testing.T) {
+			// Создание запроса
+			infoTx := NameT{
+				Name: userName,
+			}
+			bytesBody, err := json.Marshal(infoTx)
+			require.NoErrorf(t, err, "ошибка при сериализации данных: {%s}", fmt.Sprintf("%v", err))
+
+			reqBody := bytes.NewBuffer(bytesBody)
+
+			req := httptest.NewRequest(tt.httpMethod, "/status", reqBody)
+
+			req.Header.Set("authorization", userToken)
+
+			res := httptest.NewRecorder()
+
+			// Запрос
+			tt.serverInfo.HandlHttpsStatusSrv(res, req)
+			assert.Equalf(t, tt.wantErr, res.Code, "тест {%s} - ожидался код {%d}, а принят {%d}", tt.testName, tt.wantErr, res.Code)
+		})
+	}
+}
+
+// Обработчик запроса на определение количества строк в БД по дате (Успешность)
+func Test_HandlHttpsCntStrByDate_Success(t *testing.T) {
+
+	// Подключение к логеру и БД
+	var lger loger.Log_Object
+
+	db, err := openConnLogDB(&lger)
+	require.NoErrorf(t, err, "подключение к БД и Логеру - ожидалось отсутствие ошибки, а принято: %s", fmt.Sprintf("%v", err))
+
+	defer func() {
+		err = closeConn(db, &lger)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}()
+
+	// Тело запроса
+	infoTx := DateNameT{
+		Date: dateReqCntStr,
+		Name: userName,
+	}
+
+	bytesBody, err := json.Marshal(infoTx)
+	require.NoErrorf(t, err, "ошибка сериализации данных: {%v}", err)
+
+	reqBody := bytes.NewBuffer(bytesBody)
+
+	req := httptest.NewRequest(http.MethodPost, "/cntstr", reqBody)
+
+	// Чтение токена из БД
+	userToken, err := ReadUserTokenByNameDB(userName, db)
+	require.NoErrorf(t, err, "ошибка при чтении токена из БД: {%v}", err)
+
+	req.Header.Set("authorization", userToken)
+
+	// Запрос
+	res := httptest.NewRecorder()
+
+	cntStrDB, err := сntStrDataDB(dateReqCntStr, db)
+	require.NoErrorf(t, err, "ошибка: {%v} при чтении количества строк из БД по дате: {%s}", err, dateReqCntStr)
+
+	var cntStr CntStrByDateT
+	cntStr.DB = db
+	cntStr.Lgr = lger
+	cntStr.HandlHttpsCntStrByDate(res, req)
+	require.Equalf(t, 200, res.Result().StatusCode, "ожидался код 200, а принят {%d}", res.Result().StatusCode)
+
+	// Ответ
+	dataResp, err := io.ReadAll(res.Body)
+	require.NoErrorf(t, err, "ошибка при чтении тела ответа: {%v}", err)
+
+	rxJson := CntStrT{}
+
+	err = json.Unmarshal(dataResp, &rxJson)
+	require.NoErrorf(t, err, "ошибка при десериализации ответа: {%v}", err)
+
+	cntS, err := strconv.Atoi(rxJson.CntStr)
+	require.NoErrorf(t, err, "ошибка:{%v} преобразования строки:{%s} в число:{%d}", err, rxJson.CntStr, cntS)
+
+	// Проверка результата
+	assert.Equalf(t, cntStrDB, cntS, "нет соответствия в количестве. ожидалось:{%d}, а принято:{%d}", cntStrDB, cntS)
+}
+
+// Обработчик запроса на определение количества строк в БД по дате (Ошибки)
+func Test_HandlHttpsCntStrByDate_Error(t *testing.T) {
+
+	// Подключение к логеру и БД
+	var lger loger.Log_Object
+
+	db, err := openConnLogDB(&lger)
+	require.NoErrorf(t, err, "подключение к БД и Логеру - ожидалось отсутствие ошибки, а принято: %s", fmt.Sprintf("%v", err))
+
+	defer func() {
+		err = closeConn(db, &lger)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}()
+
+	// Данные для теста
+	var dataTest = []struct {
+		testName   string
+		httpMethod string
+		user       string
+		date       string
+		useToken   string
+		wantErr    int
+	}{
+		{
+			testName:   "Метод запроса не POST",
+			httpMethod: http.MethodGet,
+			user:       userName,
+			date:       dateReqCntStr,
+			useToken:   "true",
+			wantErr:    400,
+		},
+		{
+			testName:   "Нет имени пользователя",
+			httpMethod: http.MethodPost,
+			user:       "",
+			date:       dateReqCntStr,
+			useToken:   "true",
+			wantErr:    400,
+		},
+		{
+			testName:   "Фейковое имя пользователя",
+			httpMethod: http.MethodPost,
+			user:       "Такого_имени_нет",
+			date:       dateReqCntStr,
+			useToken:   "true",
+			wantErr:    400,
+		},
+		{
+			testName:   "Нет даты",
+			httpMethod: http.MethodPost,
+			user:       userName,
+			date:       "",
+			useToken:   "true",
+			wantErr:    400,
+		},
+		{
+			testName:   "Дата не в формате YYYY-MM-DD",
+			httpMethod: http.MethodPost,
+			user:       userName,
+			date:       "02-03-2025",
+			useToken:   "true",
+			wantErr:    400,
+		},
+		{
+			testName:   "Нет токена",
+			httpMethod: http.MethodPost,
+			user:       userName,
+			date:       dateReqCntStr,
+			useToken:   "false",
+			wantErr:    400,
+		},
+	}
+
+	// Тесты
+	for _, tt := range dataTest {
+		t.Run(tt.testName, func(t *testing.T) {
+
+			// Тело запроса
+			infoTx := DateNameT{
+				Date: tt.date,
+				Name: tt.user,
+			}
+
+			bytesBody, err := json.Marshal(infoTx)
+			require.NoErrorf(t, err, "ошибка сериализации данных: {%v}", err)
+
+			reqBody := bytes.NewBuffer(bytesBody)
+
+			req := httptest.NewRequest(tt.httpMethod, "/cntstr", reqBody)
+
+			// Чтение токена из БД
+			userToken, err := ReadUserTokenByNameDB(userName, db)
+			require.NoErrorf(t, err, "ошибка чтения токена из БД: {%v}", err)
+
+			if tt.useToken == "false" {
+				userToken = ""
+			}
+			req.Header.Set("authorization", userToken)
+
+			// Запрос
+			res := httptest.NewRecorder()
+
+			var cntStr CntStrByDateT
+			cntStr.DB = db
+			cntStr.Lgr = lger
+			cntStr.HandlHttpsCntStrByDate(res, req)
+			assert.Equalf(t, tt.wantErr, res.Result().StatusCode, "ожидался код:{%d}, а принят:{%d}", tt.wantErr, res.Result().StatusCode)
+		})
 	}
 }
 
@@ -348,4 +1363,33 @@ func pathLogFile() (path string, err error) {
 
 	return pathLog, nil
 
+}
+
+// Функция выполняет запрос с подсчётом количества строк по указанной дате. Возвращает ошибку.
+//
+// Параметры:
+//
+// data - набор данных
+func сntStrDataDB(date string, db *sql.DB) (cnt int, err error) {
+
+	// Проверка входных данных
+	if _, err := time.Parse("2006-01-02", date); err != nil {
+		return 0, fmt.Errorf("принятая дата не в формате YYYY-MM-DD {%v}", err)
+	}
+	if db == nil {
+		return 0, errors.New("нет указателя на БД")
+	}
+
+	q := fmt.Sprintf(`
+	SELECT COUNT(*)
+	FROM %s.%s 
+	WHERE date(timestamp) = $1
+	;`, os.Getenv("TABLE_SCHEMA"), os.Getenv("TABLE_DATA"))
+
+	err = db.QueryRow(q, date).Scan(&cnt)
+	if err != nil {
+		return 0, fmt.Errorf("ошибка при запросе количества строк по дате {%s}: {%v}", date, err)
+	}
+
+	return cnt, nil
 }

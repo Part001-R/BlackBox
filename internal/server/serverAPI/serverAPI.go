@@ -33,6 +33,11 @@ type (
 		Name string `json:"name"`
 	}
 
+	// Для токена
+	TokenT struct {
+		Token string `json:"token"`
+	}
+
 	// Для передачи состояния сервера
 	StatusServerT struct {
 		TimeStart string
@@ -171,7 +176,7 @@ func (el *StatusServerT) HandlHttpsStatusSrv(w http.ResponseWriter, r *http.Requ
 	err = json.Unmarshal(bytesBody, &rxBody)
 	if err != nil {
 		el.Lgr.W.Println("https-status -> ошибка десериализации данных тела запроса")
-		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
 
@@ -197,6 +202,83 @@ func (el *StatusServerT) HandlHttpsStatusSrv(w http.ResponseWriter, r *http.Requ
 	statusServer.MbTCP = el.MbTCP
 	statusServer.SizeF = el.SizeF
 
+	// Проверка содержимого ответа
+	if _, err = time.Parse("2006-01-02 15:04:05", statusServer.TimeStart); err != nil {
+		el.Lgr.E.Printf("https-status -> данные времени запуска сервера не в формате YYYY-MM-DD HH:MM:SS, содержится - {%s}", statusServer.TimeStart)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	if len(statusServer.MbRTU) == 0 {
+		el.Lgr.E.Println("https-status -> отсутствуют массив данных MbRTU")
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	if len(statusServer.MbTCP) == 0 {
+		el.Lgr.E.Println("https-status -> отсутствуют массив данных MbTCP")
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	if statusServer.SizeF.I < 0 {
+		el.Lgr.E.Printf("https-status -> отрицательный размер файла логера I - {%d}", statusServer.SizeF.I)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	if statusServer.SizeF.W < 0 {
+		el.Lgr.E.Printf("https-status -> отрицательный размер файла логера W - {%d}", statusServer.SizeF.W)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	if statusServer.SizeF.E < 0 {
+		el.Lgr.E.Printf("https-status -> отрицательный размер файла логера E - {%d}", statusServer.SizeF.E)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	for i, v := range statusServer.MbRTU {
+		if v.Con == "" {
+			el.Lgr.E.Printf("https-status -> массив MbRTU по индексу {%d} - отсутствует содержимое в поле Con", i)
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+		if v.ConName == "" {
+			el.Lgr.E.Printf("https-status -> массив MbRTU по индексу {%d} - отсутствует содержимое в поле ConName", i)
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+		if v.ConParams.BaudRate == 0 {
+			el.Lgr.E.Printf("https-status -> массив MbRTU по индексу {%d} - отсутствует содержимое в поле BaudRate", i)
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+		if v.ConParams.DataBits == 0 {
+			el.Lgr.E.Printf("https-status -> массив MbRTU по индексу {%d} - отсутствует содержимое в поле DataBits", i)
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+		if v.ConParams.StopBits == 0 {
+			el.Lgr.E.Printf("https-status -> массив MbRTU по индексу {%d} - отсутствует содержимое в поле StopBits", i)
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+		if v.ConParams.Parity == "" {
+			el.Lgr.E.Printf("https-status -> массив MbRTU по индексу {%d} - отсутствует содержимое в поле Parity", i)
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+	}
+	for i, v := range statusServer.MbTCP {
+		if v.Con == "" {
+			el.Lgr.E.Printf("https-status -> массив MbTCP по индексу {%d} - отсутствует содержимое в поле Con", i)
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+		if v.ConName == "" {
+			el.Lgr.E.Printf("https-status -> массив MbTCP по индексу {%d} - отсутствует содержимое в поле ConName", i)
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Сериализация данных ответа
 	resp, err := json.Marshal(statusServer)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
@@ -359,6 +441,12 @@ func (el *DataDBCallT) HandlHttpXlsxDataDB(w http.ResponseWriter, r *http.Reques
 // Обработчик регистрации пользователя на https сервере
 func (el *LoginUserT) HandlHttpsRegistration(w http.ResponseWriter, r *http.Request) {
 
+	if r.Method != http.MethodPost {
+		el.Lgr.E.Printf("https-registration -> принят запрос с методом: {%s}, а нужен: {POST}", r.Method)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
 	rcvStr, err := io.ReadAll(r.Body)
 	if err != nil {
 		el.Lgr.E.Println("https-registration -> ошибка при чтении тела запроса")
@@ -376,8 +464,23 @@ func (el *LoginUserT) HandlHttpsRegistration(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Проверка принятых данных
+	if len(slStr) != 2 {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
 	rxUsrName := slStr[0]
-	rxUserPsw := slStr[1]
+	rxUsrPsw := slStr[1]
+
+	if rxUsrName == "" {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+	if rxUsrPsw == "" {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
 
 	// Чтение из БД хэша пароля пользователя
 	dbPswHash, err := readPswUserDB(rxUsrName, el.DB)
@@ -388,7 +491,7 @@ func (el *LoginUserT) HandlHttpsRegistration(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Проверка соответствия хэшей
-	calcHash := fmt.Sprintf("%x", sha256.Sum256([]byte(rxUserPsw)))
+	calcHash := fmt.Sprintf("%x", sha256.Sum256([]byte(rxUsrPsw)))
 
 	if dbPswHash != calcHash {
 		el.Lgr.W.Printf("https-registration -> принят запрос пользователя {%s} с не верным паролем", rxUsrName)
@@ -397,13 +500,21 @@ func (el *LoginUserT) HandlHttpsRegistration(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Вычисление токена
-	token := generateToken(rxUsrName, rxUserPsw)
+	var dataToken TokenT
+	dataToken.Token = generateToken(rxUsrName, rxUsrPsw)
 
 	// Сохрание токена в БД
-	err = saveTokenUserDB(rxUsrName, token, el.DB)
+	err = saveTokenUserDB(rxUsrName, dataToken.Token, el.DB)
 	if err != nil {
 		el.Lgr.E.Printf("https-registration -> ошибка {%v} при сохранении в БД хэша пароля для пользователя {%s}\n", err, rxUsrName)
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	dataTx, err := json.Marshal(dataToken)
+	if err != nil {
+		el.Lgr.E.Printf("https-registration -> ошибка {%v} сериализации данных {%v}", err, dataToken)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
@@ -412,25 +523,27 @@ func (el *LoginUserT) HandlHttpsRegistration(w http.ResponseWriter, r *http.Requ
 
 	w.Header().Set("Content-Type", "application-json")
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(token))
-
+	w.Write(dataTx)
 }
 
 // Обработка запроса на количество строк в БД по дате.
 func (el *CntStrByDateT) HandlHttpsCntStrByDate(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application-json")
+
+	if r.Method != http.MethodPost {
+		el.Lgr.W.Printf("https-cntstr -> принят запрос с методом:{%s}, а нужен:{%s}", r.Method, http.MethodPost)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
 
 	// Чтение заголовка
 	token := r.Header.Get("authorization")
 	if token == "" {
-		el.Lgr.W.Println("https-cntstr -> нет токена")
+		el.Lgr.W.Println("https-cntstr -> в принятом запросе нет токена")
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
 
 	// Тело запроса
-	var reqBoddy DateNameT
-
 	bytesBody, err := io.ReadAll(r.Body)
 	if err != nil {
 		el.Lgr.W.Println("https-cntstr -> ошибка чтения тела запроса")
@@ -444,20 +557,23 @@ func (el *CntStrByDateT) HandlHttpsCntStrByDate(w http.ResponseWriter, r *http.R
 		}
 	}()
 
+	var reqBoddy DateNameT
 	err = json.Unmarshal(bytesBody, &reqBoddy)
 	if err != nil {
-
+		el.Lgr.W.Printf("https-cntstr -> ошибка при десериализации {%s}", reqBoddy.Date)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
 	}
 
 	// Проверка данных тела запроса
 	_, err = time.Parse("2006-01-02", reqBoddy.Date)
 	if err != nil {
-		el.Lgr.W.Printf("https-cntstr -> в date не дате {%s}", reqBoddy.Date)
+		el.Lgr.W.Printf("https-cntstr -> в принятом запросе, дата {%s} не в формате YYYY-MM-DD", reqBoddy.Date)
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
 	if reqBoddy.Name == "" {
-		el.Lgr.W.Println("https-cntstr -> нет данных в name")
+		el.Lgr.W.Println("https-cntstr -> в принятом запросе нет данных имени")
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
@@ -465,7 +581,7 @@ func (el *CntStrByDateT) HandlHttpsCntStrByDate(w http.ResponseWriter, r *http.R
 	// Проверка, что принятое имя и его токен соответствуют
 	tokenDB, err := ReadUserTokenByNameDB(reqBoddy.Name, el.DB)
 	if err != nil {
-		el.Lgr.W.Printf("https-cntstr -> ошибка при получении токена, по имени пользователя {%v}", err)
+		el.Lgr.W.Printf("https-cntstr -> ошибка получения токена, по имени пользователя:{%s} {%v}", reqBoddy.Name, err)
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
@@ -500,6 +616,8 @@ func (el *CntStrByDateT) HandlHttpsCntStrByDate(w http.ResponseWriter, r *http.R
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
+
+	w.Header().Set("Content-Type", "application-json")
 
 	el.Lgr.I.Printf("https-cntstr -> выполнен запрос количество строк в БД на {%s}", reqBoddy.Date)
 	w.WriteHeader(http.StatusOK)
@@ -775,6 +893,14 @@ func readPswUserDB(name string, db *sql.DB) (psw string, err error) {
 // name - имя пользователя
 // db - указатель на БД
 func ReadUserTokenByNameDB(name string, db *sql.DB) (token string, err error) {
+
+	// Проверка принятых данных
+	if name == "" {
+		return "", errors.New("ошибка: при порлучении токена - нет имени пользователя")
+	}
+	if db == nil {
+		return "", errors.New("ошибка: нет указател на БД")
+	}
 
 	q := fmt.Sprintf("SELECT token FROM %s.%s WHERE name = $1",
 		os.Getenv("TABLE_SCHEMA"),
