@@ -40,42 +40,49 @@ func run() {
 func menu() {
 	var str string
 
-	fmt.Println("1: Вывод информации сервера")
-	fmt.Println("2: Запросить данные сервера")
-	fmt.Println("3: Завершение работы")
-	fmt.Print("->")
-	_, err := fmt.Scanln(&str)
-	if err != nil {
-		log.Fatal("Ошибка чтения введённых данных")
-	}
-
-	switch str {
-	case "1":
-		err := showStatusServer()
+	for {
+		fmt.Println("---------------------------")
+		fmt.Println("1: Вывод информации сервера")
+		fmt.Println("2: Запросить данные сервера")
+		fmt.Println("3: Завершение работы")
+		fmt.Print("->")
+		_, err := fmt.Scanln(&str)
 		if err != nil {
-			fmt.Println("Ошибка:", err)
-			fmt.Println("Работа прервана")
-			return
+			log.Fatal("Ошибка чтения введённых данных")
 		}
-	case "2":
-		fmt.Println()
-		fmt.Print("Введите дату экспорта (YYYY-MM-DD): ")
-		fmt.Scanln(&str)
 
-		err := partDataDB(str) // Запрос данных с дроблением. Запрос по 100 строк, до завершения.
-		if err != nil {
-			fmt.Printf("Ошибка запроса архивных данных: {%v}\n", err)
-			fmt.Println("Работа прервана")
+		switch str {
+		case "1":
+			err := showStatusServer()
+			if err != nil {
+				fmt.Println("Ошибка:", err)
+				fmt.Println("Работа прервана")
+				return
+			}
+			continue
+
+		case "2":
+			fmt.Println()
+			fmt.Print("Введите дату экспорта (YYYY-MM-DD): ")
+			fmt.Scanln(&str)
+
+			err := partDataDB(str) // Запрос данных с дроблением. Запрос по 100 строк, до завершения.
+			if err != nil {
+				fmt.Printf("Ошибка запроса архивных данных: {%v}\n", err)
+				fmt.Println("Работа прервана")
+				return
+			}
+			fmt.Println("Данные приняты")
+			fmt.Println()
+			continue
+
+		case "3":
 			return
+
+		default:
+			fmt.Println("Ошибка ввода")
+			fmt.Println()
 		}
-		fmt.Println("Данные приняты")
-
-	case "3":
-		return
-
-	default:
-		fmt.Println("Ошибка ввода. Работа завершена")
-		return
 	}
 }
 
@@ -116,134 +123,6 @@ func showStatusServer() error {
 	fmt.Printf("Размер в МБ файла логирования - Предупреждение:{%d}\n", statusSrv.SizeF.W)
 	fmt.Printf("Размер в МБ файла логирования - Ошибки        :{%d}\n", statusSrv.SizeF.E)
 	fmt.Println()
-
-	return nil
-}
-
-// Запрос архивных данных БД. Функция возвращает ошибку
-func expDataDB(startDate string) error {
-
-	// Проверка корректности ввода даты
-	t, err := time.Parse("2006-01-02", startDate)
-	if err != nil {
-		return fmt.Errorf("ошибка ввода даты: {%s}", t)
-	}
-
-	var dataDB clientapi.RxDataDB
-
-	dataDB.StartDate = startDate
-
-	// Запрос архивных данных БД
-	err = dataDB.ReqDataDB()
-	if err != nil {
-		return fmt.Errorf("ошибка запроса архивных данных ДБ: {%v}", err)
-	}
-
-	fmt.Printf("принято %s строк\n", dataDB.CntStr)
-
-	// Формирование Exlx файла данных
-	err = saveDataXlsx(dataDB)
-	if err != nil {
-		return fmt.Errorf("ошибка при сохранении данных в xlsx файл: {%v}", err)
-	}
-
-	return nil
-}
-
-// Запрос xlsx файла с архивными данными БД. Функция возвращает ошибку
-func getXlsxDataDB(startDate string) error {
-
-	// Проверка корректности ввода даты
-	t, err := time.Parse("2006-01-02", startDate)
-	if err != nil {
-		return fmt.Errorf("ошибка ввода даты: {%s}", t)
-	}
-
-	var dataDB clientapi.RxDataDB
-
-	dataDB.StartDate = startDate
-
-	// Запрос архивных данных БД
-	err = dataDB.ReqXlsxDataDB()
-	if err != nil {
-		return fmt.Errorf("ошибка запроса xlsx файла: {%v}", err)
-	}
-
-	fmt.Printf("По дате {%s}, в БД {%s} строк\n", dataDB.StartDate, dataDB.CntStr)
-	return nil
-}
-
-// Функция создаёт xlsx файл и сохраняет туда принятые данные от сервера. Возвращает ошибку.
-func saveDataXlsx(data clientapi.RxDataDB) (err error) {
-
-	tn := time.Now().Format("02.01.2006-15:04:05")
-
-	// Создание файла
-	fileName, err := libre.CreateXlsx("./", "exportData_"+data.StartDate+"___", tn, ".xlsx")
-	if err != nil {
-		return fmt.Errorf("ошибка при создании xlsx файла экспорта: {%v}", err)
-	}
-
-	// Открытие файла
-	file, err := excelize.OpenFile(fileName)
-	if err != nil {
-		return fmt.Errorf("ошибка при открытии файла: {%v}", fileName)
-	}
-
-	// Заполнение файла
-
-	nameSheet := "DataDB"
-
-	// Формирование заголовков
-	// Name:	Value:	Quality:	TimeStamp:
-	err = file.SetCellValue(nameSheet, "A1", "Name:")
-	if err != nil {
-		return errors.New("ошибка при добавлении заголовка столбца Name")
-	}
-	err = file.SetCellValue(nameSheet, "B1", "Value:")
-	if err != nil {
-		return errors.New("ошибка при добавлении заголовка столбца Value")
-	}
-	err = file.SetCellValue(nameSheet, "C1", "Quality:")
-	if err != nil {
-		return errors.New("ошибка при добавлении заголовка столбца Quality")
-	}
-	err = file.SetCellValue(nameSheet, "D1", "TimeStamp:")
-	if err != nil {
-		return errors.New("ошибка при добавлении заголовка столбца TimeStamp")
-	}
-
-	// Перенос данных
-	for i, str := range data.Data {
-
-		i++
-
-		err = file.SetCellValue(nameSheet, fmt.Sprintf("A%d", i), str.Name)
-		if err != nil {
-			return fmt.Errorf("ошибка добавления значения {%s} в ячейку {A%d}", str.Name, i)
-		}
-
-		err = file.SetCellValue(nameSheet, fmt.Sprintf("B%d", i), str.Value)
-		if err != nil {
-			return fmt.Errorf("ошибка добавления значения {%s} в ячейку {B%d}", str.Value, i)
-		}
-
-		err = file.SetCellValue(nameSheet, fmt.Sprintf("C%d", i), str.Qual)
-		if err != nil {
-			return fmt.Errorf("ошибка добавления значения {%s} в ячейку {C%d}", str.Qual, i)
-		}
-
-		err = file.SetCellValue(nameSheet, fmt.Sprintf("D%d", i), str.TimeStamp)
-		if err != nil {
-			return fmt.Errorf("ошибка добавления значения {%s} в ячейку {D%d}", str.TimeStamp, i)
-		}
-	}
-
-	// Сохрангение
-	err = file.Save()
-	if err != nil {
-		return errors.New("ошибка при сохранении Xlsx файла")
-	}
 
 	return nil
 }

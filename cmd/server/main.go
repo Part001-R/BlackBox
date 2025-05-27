@@ -2923,10 +2923,19 @@ func httpServer() {
 
 	//
 	r.Get("/status", func(w http.ResponseWriter, r *http.Request) {
-		// Предоставление сводной информации о сервере
-		collectServInfo()
+		// предоставляет сводные данные состояние сервера
+		collectData, err := collectServInfo()
+		if err != nil {
+			lgr.E.Printf("https-status -> ошибка при сборе данных сервера: {%s}", err)
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+
+		srvInfo.TimeStart = collectData.TimeStart
 		srvInfo.DB = db.Ptr
 		srvInfo.Lgr = lgr
+		srvInfo.MbRTU = collectData.MbRTU
+		srvInfo.MbTCP = collectData.MbTCP
 		srvInfo.HandlHttpStatusSrv(w, r)
 	})
 
@@ -3019,10 +3028,13 @@ func goHttpsServer() {
 // Функция выполняет сбор данных состояния сервера.
 func collectServInfo() (info serverAPI.StatusServerT, err error) {
 
-	info = serverAPI.StatusServerT{}
+	collect := serverAPI.StatusServerT{}
 
-	info.MbRTU = make([]serverAPI.InfoModbusRTUT, 0)
-	info.MbTCP = make([]serverAPI.InfoModbusTCPT, 0)
+	collect.MbRTU = make([]serverAPI.InfoModbusRTUT, 0)
+	collect.MbTCP = make([]serverAPI.InfoModbusTCPT, 0)
+
+	// Время запуска сервера
+	collect.TimeStart = srvInfo.TimeStart
 
 	// Сбор информации по Modbus-RTU
 	for _, v := range hostConnects.mbRTUmaster {
@@ -3034,7 +3046,7 @@ func collectServInfo() (info serverAPI.StatusServerT, err error) {
 		mbRTU.ConParams.Parity = v.ParamsConn.Parity
 		mbRTU.ConParams.StopBits = v.ParamsConn.StopBits
 
-		info.MbRTU = append(srvInfo.MbRTU, mbRTU)
+		collect.MbRTU = append(collect.MbRTU, mbRTU)
 	}
 
 	// Сбор информации по Modbus-TCP
@@ -3043,15 +3055,14 @@ func collectServInfo() (info serverAPI.StatusServerT, err error) {
 		mbTCP.ConName = v.Name
 		mbTCP.Con = v.HostIP
 
-		info.MbTCP = append(srvInfo.MbTCP, mbTCP)
+		collect.MbTCP = append(collect.MbTCP, mbTCP)
 	}
 
 	// Получение информации о размерности файлов логера
-	srvInfo.SizeF.I, srvInfo.SizeF.W, srvInfo.SizeF.E, err = lgr.SizeFiles()
+	collect.SizeF.I, collect.SizeF.W, collect.SizeF.E, err = lgr.SizeFiles()
 	if err != nil {
 		return serverAPI.StatusServerT{}, fmt.Errorf("ошибка при получении размеров файлов лога: {%s}", err)
 	}
 
-	return info, nil
-
+	return collect, nil
 }

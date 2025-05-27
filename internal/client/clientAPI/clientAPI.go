@@ -14,6 +14,11 @@ import (
 )
 
 type (
+	// Для передачи количества строк
+	CntStrT struct {
+		CntStr string `json:"cntstr"`
+	}
+
 	// JSON для приёма данных состояния сервера
 	RxStatusSrv struct {
 		TimeStart string          `json:"timeStart"`
@@ -245,6 +250,7 @@ func (rx *RxDataDB) ReqCntStrByDateDB() error {
 		return errors.New("req-cntStr -> сервер не отправил код 200")
 	}
 
+	// Чтение тела ответа
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return errors.New("req-cntStr -> ошибка чтения тела ответа")
@@ -253,18 +259,24 @@ func (rx *RxDataDB) ReqCntStrByDateDB() error {
 		_ = resp.Body.Close()
 	}()
 
+	var cntInfo CntStrT
+
+	err = json.Unmarshal(body, &cntInfo)
+	if err != nil {
+		return fmt.Errorf("req-cntStr -> ошибка десиреализации тела ответа:{%v}", err)
+	}
+
 	// Проверка содержимого тела ответа
-	cntStr := string(body)
-	if cntStr == "" {
+	if cntInfo.CntStr == "" {
 		return errors.New("req-cntStr -> в теле ответа нет данных о количестве строк БД")
 	}
-	_, err = strconv.Atoi(cntStr)
+	_, err = strconv.Atoi(cntInfo.CntStr)
 	if err != nil {
-		return fmt.Errorf("req-cntStr -> принятое значение {%s} количества строк, не является числом", cntStr)
+		return fmt.Errorf("req-cntStr -> принятое значение {%s} количества строк, не является числом", cntInfo.CntStr)
 	}
 
 	// сохранение количества строк
-	rx.CntStr = cntStr
+	rx.CntStr = cntInfo.CntStr
 
 	return nil
 }

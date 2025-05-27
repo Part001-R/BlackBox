@@ -295,7 +295,24 @@ func (el *StatusServerT) HandlHttpsStatusSrv(w http.ResponseWriter, r *http.Requ
 // Обработчик запроса на предоставление состояния Go рутин
 func (el *StatusServerT) HandlHttpStatusSrv(w http.ResponseWriter, r *http.Request) {
 
-	w.Header().Set("Content-Type", "application/json")
+	// Проверка указателя на БД
+	if el.DB == nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	// Проверка указателей логеров
+	if el.Lgr.I == nil || el.Lgr.W == nil || el.Lgr.E == nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	// Проверка метода запроса
+	if r.Method != http.MethodGet {
+		el.Lgr.W.Printf("http-status -> принят запрос с методом {%s}, а нужен {%s}", r.Method, http.MethodPost)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
 
 	// Подготовка данных для отправки
 	var statusServer StatusT
@@ -305,6 +322,83 @@ func (el *StatusServerT) HandlHttpStatusSrv(w http.ResponseWriter, r *http.Reque
 	statusServer.MbTCP = el.MbTCP
 	statusServer.SizeF = el.SizeF
 
+	// Проверка содержимого ответа
+	if _, err := time.Parse("2006-01-02 15:04:05", statusServer.TimeStart); err != nil {
+		el.Lgr.E.Printf("http-status -> данные времени запуска сервера не в формате YYYY-MM-DD HH:MM:SS, содержится - {%s}", statusServer.TimeStart)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	if len(statusServer.MbRTU) == 0 {
+		el.Lgr.E.Println("http-status -> отсутствуют массив данных MbRTU")
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	if len(statusServer.MbTCP) == 0 {
+		el.Lgr.E.Println("http-status -> отсутствуют массив данных MbTCP")
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	if statusServer.SizeF.I < 0 {
+		el.Lgr.E.Printf("http-status -> отрицательный размер файла логера I - {%d}", statusServer.SizeF.I)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	if statusServer.SizeF.W < 0 {
+		el.Lgr.E.Printf("http-status -> отрицательный размер файла логера W - {%d}", statusServer.SizeF.W)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	if statusServer.SizeF.E < 0 {
+		el.Lgr.E.Printf("http-status -> отрицательный размер файла логера E - {%d}", statusServer.SizeF.E)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	for i, v := range statusServer.MbRTU {
+		if v.Con == "" {
+			el.Lgr.E.Printf("http-status -> массив MbRTU по индексу {%d} - отсутствует содержимое в поле Con", i)
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+		if v.ConName == "" {
+			el.Lgr.E.Printf("http-status -> массив MbRTU по индексу {%d} - отсутствует содержимое в поле ConName", i)
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+		if v.ConParams.BaudRate == 0 {
+			el.Lgr.E.Printf("http-status -> массив MbRTU по индексу {%d} - отсутствует содержимое в поле BaudRate", i)
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+		if v.ConParams.DataBits == 0 {
+			el.Lgr.E.Printf("http-status -> массив MbRTU по индексу {%d} - отсутствует содержимое в поле DataBits", i)
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+		if v.ConParams.StopBits == 0 {
+			el.Lgr.E.Printf("http-status -> массив MbRTU по индексу {%d} - отсутствует содержимое в поле StopBits", i)
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+		if v.ConParams.Parity == "" {
+			el.Lgr.E.Printf("http-status -> массив MbRTU по индексу {%d} - отсутствует содержимое в поле Parity", i)
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+	}
+	for i, v := range statusServer.MbTCP {
+		if v.Con == "" {
+			el.Lgr.E.Printf("http-status -> массив MbTCP по индексу {%d} - отсутствует содержимое в поле Con", i)
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+		if v.ConName == "" {
+			el.Lgr.E.Printf("http-status -> массив MbTCP по индексу {%d} - отсутствует содержимое в поле ConName", i)
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// Сериализация данных
 	resp, err := json.Marshal(statusServer)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
@@ -312,6 +406,8 @@ func (el *StatusServerT) HandlHttpStatusSrv(w http.ResponseWriter, r *http.Reque
 	}
 
 	// Передача данных
+	w.Header().Set("Content-Type", "application/json")
+
 	el.Lgr.I.Printf("http-status -> локальный запрос состояние сервера")
 	w.WriteHeader(http.StatusOK)
 	w.Write(resp)
@@ -626,6 +722,13 @@ func (el *CntStrByDateT) HandlHttpsCntStrByDate(w http.ResponseWriter, r *http.R
 
 // Обработка запроса на количество строк в БД по дате.
 func (el *CntStrByDateT) HandlHttpCntStrByDate(w http.ResponseWriter, r *http.Request) {
+
+	// Проверка входных данных
+	if r.Method != http.MethodGet {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
 	// Чтение параметров запроса
 	qP := r.URL.Query()
 
@@ -655,15 +758,33 @@ func (el *CntStrByDateT) HandlHttpCntStrByDate(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	// Подготовка ответа
+	cntStr := strconv.Itoa(d.CntStrDB)
+
+	cntInfo := CntStrT{
+		CntStr: cntStr,
+	}
+	bTx, err := json.Marshal(cntInfo)
+	if err != nil {
+		el.Lgr.W.Println("https-cntstr -> ошибка сериализации данных счётчика строк")
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	// Ответ
 	el.Lgr.I.Printf("клиент http -> выполнен запрос количество строк в БД на {%s}", dateExp)
 	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(fmt.Sprintf("%d", d.CntStrDB)))
+	w.Write(bTx)
 }
 
 // Обработка запроса на загрузку части строк
 func (el *PartDataT) HandlHttpsPartDataDB(w http.ResponseWriter, r *http.Request) {
 
-	w.Header().Set("Content-Type", "application-json")
+	if r.Method != http.MethodPost {
+		el.Lgr.W.Printf("hdlr-partdatadb -> принят запрос:{%s}, а ожидается POST", r.Method)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
 
 	// Чтение заголовков
 	token := r.Header.Get("authorization")
@@ -724,6 +845,11 @@ func (el *PartDataT) HandlHttpsPartDataDB(w http.ResponseWriter, r *http.Request
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
+	if numbReq < 0 {
+		el.Lgr.W.Printf("hdlr-partdatadb -> принят запрос c отрицательным numbReg {%s}", RxNumbReg)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
 
 	rxStrLimit := qP.Get("strLimit")
 	if rxStrLimit == "" {
@@ -737,6 +863,11 @@ func (el *PartDataT) HandlHttpsPartDataDB(w http.ResponseWriter, r *http.Request
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
+	if limit < 0 {
+		el.Lgr.W.Printf("hdlr-partdatadb -> принят запрос c отрицательным limit {%s}", rxStrLimit)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
 
 	rxStrOffSet := qP.Get("strOffSet")
 	if rxStrOffSet == "" {
@@ -747,6 +878,11 @@ func (el *PartDataT) HandlHttpsPartDataDB(w http.ResponseWriter, r *http.Request
 	OffSet, err := strconv.Atoi(rxStrOffSet)
 	if err != nil {
 		el.Lgr.W.Printf("hdlr-partdatadb -> принят запрос где в strOffSet не число {%s}", rxStrOffSet)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+	if OffSet < 0 {
+		el.Lgr.W.Printf("hdlr-partdatadb -> принят запрос c отрицательным OffSet {%s}", rxStrOffSet)
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
@@ -783,63 +919,90 @@ func (el *PartDataT) HandlHttpsPartDataDB(w http.ResponseWriter, r *http.Request
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
+
+	//el.Lgr.I.Printf("https-PartData -> Предоставлены данные. По дате:{%s}, номер запроса:{%d}, строк:{%d}, смещение:{%d}", reqBody.Date, numbReq, len(rdDataDB), OffSet)
+
+	w.Header().Set("Content-Type", "application-json")
 	w.WriteHeader(http.StatusOK)
 	w.Write(txByte)
 }
 
 // Обработка запроса на загрузку части строк
 func (el *PartDataT) HandlHttpPartDataDB(w http.ResponseWriter, r *http.Request) {
+
+	// Проверка метода запроса
+	if r.Method != http.MethodGet {
+		el.Lgr.W.Printf("http-partdatadb -> принят запрос с методом:{%s}, а ожидается POST", r.Method)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
 	// Чтение параметров запроса. Проверка.
 	qP := r.URL.Query()
 
 	RxNumbReg := qP.Get("numbReg")
 	if RxNumbReg == "" {
-		el.Lgr.W.Println("hdlr-partdatadb -> принят запрос с пустым содержимым numbReg")
+		el.Lgr.W.Println("http-partdatadb -> принят запрос с пустым содержимым numbReg")
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
 	numbReq, err := strconv.Atoi(RxNumbReg)
 	if err != nil {
-		el.Lgr.W.Printf("hdlr-partdatadb -> принят запрос где в numbReg не число {%s}", RxNumbReg)
+		el.Lgr.W.Printf("http-partdatadb -> принят запрос где в numbReg не число {%s}", RxNumbReg)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+	if numbReq < 0 {
+		el.Lgr.W.Printf("http-partdatadb -> отрицательное число в RxNumbReg  {%s}", RxNumbReg)
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
 
 	rxStrLimit := qP.Get("strLimit")
 	if rxStrLimit == "" {
-		el.Lgr.W.Println("hdlr-partdatadb -> принят запрос с пустым содержимым strLimit")
+		el.Lgr.W.Println("http-partdatadb -> принят запрос с пустым содержимым strLimit")
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
 	limit, err := strconv.Atoi(rxStrLimit)
 	if err != nil {
-		el.Lgr.W.Printf("hdlr-partdatadb -> принят запрос где в strLimit не число {%s}", rxStrLimit)
+		el.Lgr.W.Printf("http-partdatadb -> принят запрос где в strLimit не число {%s}", rxStrLimit)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+	if limit < 0 {
+		el.Lgr.W.Printf("http-partdatadb -> отрицательное число в limit {%s}", rxStrLimit)
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
 
 	rxStrOffSet := qP.Get("strOffSet")
 	if rxStrOffSet == "" {
-		el.Lgr.W.Println("hdlr-partdatadb -> принят запрос с пустым содержимым strOffSet")
+		el.Lgr.W.Println("http-partdatadb -> принят запрос с пустым содержимым strOffSet")
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
 	OffSet, err := strconv.Atoi(rxStrOffSet)
 	if err != nil {
-		el.Lgr.W.Printf("hdlr-partdatadb -> принят запрос где в strOffSet не число {%s}", rxStrOffSet)
+		el.Lgr.W.Printf("http-partdatadb -> принят запрос где в strOffSet не число {%s}", rxStrOffSet)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+	if OffSet < 0 {
+		el.Lgr.W.Printf("http-partdatadb -> отрицательное число в OffSet {%s}", rxStrOffSet)
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
 
 	dateDB := qP.Get("dateDB")
 	if dateDB == "" {
-		el.Lgr.W.Println("hdlr-partdatadb -> принят запрос с пустым содержимым dateDB")
+		el.Lgr.W.Println("http-partdatadb -> принят запрос с пустым содержимым dateDB")
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
 	_, err = time.Parse("2006-01-02", dateDB)
 	if err != nil {
-		el.Lgr.W.Printf("hdlr-partdatadb -> принят запрос где в dateDB не дата {%s}", dateDB)
+		el.Lgr.W.Printf("http-partdatadb -> принят запрос где в dateDB не дата {%s}", dateDB)
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
