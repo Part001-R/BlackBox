@@ -21,6 +21,7 @@ jobs:
               run: go build -v -o client main.go
 
     build_server:
+        needs: build_client
         runs-on: ubuntu-latest
         steps:
             - name: Install Go
@@ -78,6 +79,6 @@ jobs:
  #           - name: Checkout
  #             uses: actions/Checkout@v4
  #           - name: Test
- #             run: go test -race -v ./...
+ #             run: go test -race-v ./...
 
 
